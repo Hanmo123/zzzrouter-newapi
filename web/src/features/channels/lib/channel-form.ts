@@ -204,6 +204,12 @@ function addRequiredIssue(
 export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
+    provider_id: z.number().int().positive().optional(),
+    upstream_ratio: z
+      .number({ error: 'Upstream ratio must be greater than zero' })
+      .finite('Upstream ratio must be greater than zero')
+      .positive('Upstream ratio must be greater than zero')
+      .optional(),
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
     base_url: z.string().optional(),
     task_plugin_key: z.string().optional(),
@@ -427,6 +433,8 @@ export type ChannelFormValues = z.infer<typeof channelFormSchema>
 
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
+  provider_id: undefined,
+  upstream_ratio: 1,
   type: 1,
   base_url: '',
   task_plugin_key: '',
@@ -591,6 +599,8 @@ export function transformChannelToFormDefaults(
 
   return {
     name: channel.name || '',
+    provider_id: channel.provider_id || undefined,
+    upstream_ratio: channel.upstream_ratio ?? 1,
     type: channel.type,
     base_url: channel.base_url || '',
     key: '', // Never populate key from backend for security
@@ -844,6 +854,8 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
 
   const channel: Partial<Channel> = {
     name: formData.name,
+    provider_id: formData.provider_id,
+    upstream_ratio: formData.upstream_ratio ?? 1,
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,
     key: formData.key,
@@ -892,6 +904,8 @@ export function transformFormDataToUpdatePayload(
 ): Partial<Channel> {
   const payload: Partial<Channel> = {
     id: channelId,
+    provider_id: formData.provider_id,
+    upstream_ratio: formData.upstream_ratio ?? 1,
     name: formData.name,
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,

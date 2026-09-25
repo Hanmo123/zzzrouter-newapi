@@ -146,8 +146,11 @@ func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	return query
 }
 
-func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm.DB {
+func buildChannelListQuery(group string, statusFilter int, typeFilter int, providerID int) *gorm.DB {
 	query := model.DB.Model(&model.Channel{})
+	if providerID > 0 {
+		query = query.Where("provider_id = ?", providerID)
+	}
 	query = model.ApplyChannelGroupFilter(query, group)
 	query = applyChannelStatusFilter(query, statusFilter)
 	if typeFilter >= 0 {
@@ -190,6 +193,11 @@ func GetChannelDefaultBaseURLs(c *gin.Context) {
 }
 
 func GetAllChannels(c *gin.Context) {
+	providerID, err := channelProviderFilter(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	channelData := make([]*model.Channel, 0)
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
@@ -211,13 +219,13 @@ func GetAllChannels(c *gin.Context) {
 	var total int64
 
 	if enableTagMode {
-		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+		tags, err := model.GetPaginatedChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, providerID), pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 		if err != nil {
 			common.SysError("failed to get paginated tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签失败，请稍后重试"})
 			return
 		}
-		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter))
+		total, err = model.CountChannelTags(buildChannelListQuery(groupFilter, statusFilter, typeFilter, providerID))
 		if err != nil {
 			common.SysError("failed to count tags: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取标签数量失败，请稍后重试"})
@@ -228,7 +236,7 @@ func GetAllChannels(c *gin.Context) {
 				continue
 			}
 			var tagChannels []*model.Channel
-			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter).Where("tag = ?", *tag)).
+			err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, providerID).Where("tag = ?", *tag)).
 				Omit("key").
 				Find(&tagChannels).Error
 			if err != nil {
@@ -239,13 +247,13 @@ func GetAllChannels(c *gin.Context) {
 			channelData = append(channelData, tagChannels...)
 		}
 	} else {
-		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter).Count(&total).Error; err != nil {
+		if err := buildChannelListQuery(groupFilter, statusFilter, typeFilter, providerID).Count(&total).Error; err != nil {
 			common.SysError("failed to count channels: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道数量失败，请稍后重试"})
 			return
 		}
 
-		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter)).
+		err := sortOptions.Apply(buildChannelListQuery(groupFilter, statusFilter, typeFilter, providerID)).
 			Limit(pageInfo.GetPageSize()).
 			Offset(pageInfo.GetStartIdx()).
 			Omit("key").
@@ -261,7 +269,7 @@ func GetAllChannels(c *gin.Context) {
 		clearChannelInfo(datum)
 	}
 
-	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
+	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1, providerID)
 	var results []struct {
 		Type  int64
 		Count int64
@@ -365,6 +373,11 @@ func FixChannelsAbilities(c *gin.Context) {
 }
 
 func SearchChannels(c *gin.Context) {
+	providerID, err := channelProviderFilter(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	keyword := c.Query("keyword")
 	group := c.Query("group")
 	modelKeyword := c.Query("model")
@@ -386,7 +399,7 @@ func SearchChannels(c *gin.Context) {
 		for _, tag := range tags {
 			if tag != nil && *tag != "" {
 				var tagChannels []*model.Channel
-				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1).Where("tag = ?", *tag)).
+				err := sortOptions.Apply(buildChannelListQuery(group, -1, -1, providerID).Where("tag = ?", *tag)).
 					Omit("key").
 					Find(&tagChannels).Error
 				if err != nil {
@@ -409,6 +422,16 @@ func SearchChannels(c *gin.Context) {
 			return
 		}
 		channelData = channels
+	}
+
+	if providerID > 0 {
+		filtered := make([]*model.Channel, 0, len(channelData))
+		for _, channel := range channelData {
+			if channel.ProviderID == providerID {
+				filtered = append(filtered, channel)
+			}
+		}
+		channelData = filtered
 	}
 
 	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
@@ -1136,6 +1159,14 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	clearChannelReadOnlyFields(&channel, requestData)
+	if _, provided := requestData["provider_id"]; provided && channel.ProviderID <= 0 {
+		common.ApiErrorMsg(c, "provider_id must be positive")
+		return
+	}
+	if value, provided := requestData["upstream_ratio"]; provided && value == nil {
+		common.ApiErrorMsg(c, "upstream_ratio cannot be null")
+		return
+	}
 
 	if channel.Type == constant.ChannelTypeTaskPlugin &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.TaskPluginBind) {
@@ -1291,6 +1322,12 @@ func UpdateChannel(c *gin.Context) {
 	}
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
+	if channel.ProviderID != originChannel.ProviderID {
+		changedFields = append(changedFields, "provider_id")
+	}
+	if channel.UpstreamRatio != nil && (originChannel.UpstreamRatio == nil || *channel.UpstreamRatio != *originChannel.UpstreamRatio) {
+		changedFields = append(changedFields, "upstream_ratio")
+	}
 	if channel.Models != originChannel.Models {
 		changedFields = append(changedFields, "models")
 	}

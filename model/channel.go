@@ -55,6 +55,11 @@ type Channel struct {
 
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
+	ProviderID int `json:"provider_id" gorm:"not null;default:0;index"`
+	// UpstreamRatio records the channel's upstream commercial multiplier (1 = base price).
+	// It is metadata only: it must not implicitly change customer billing or routing.
+	UpstreamRatio *float64 `json:"upstream_ratio" gorm:"not null;default:1"`
+
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
 }
@@ -350,7 +355,14 @@ func (channel *Channel) GetAutoBan() bool {
 }
 
 func (channel *Channel) Save() error {
-	return DB.Save(channel).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// Save may insert a record as well as replace one; normalize the full
+		// record so this internal path cannot persist an unassigned channel.
+		if err := validateChannelProvider(tx, channel, true); err != nil {
+			return err
+		}
+		return tx.Save(channel).Error
+	})
 }
 
 // saveStatusState persists only the fields owned by the channel status flow.
@@ -463,6 +475,12 @@ func BatchInsertChannels(channels []Channel) error {
 		}
 	}()
 
+	for i := range channels {
+		if err := validateChannelProvider(tx, &channels[i], true); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
 	for _, chunk := range lo.Chunk(channels, 50) {
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
@@ -546,13 +564,15 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
-	var err error
-	err = DB.Create(channel).Error
-	if err != nil {
-		return err
-	}
-	err = channel.AddAbilities(nil)
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := validateChannelProvider(tx, channel, true); err != nil {
+			return err
+		}
+		if err := tx.Create(channel).Error; err != nil {
+			return err
+		}
+		return channel.AddAbilities(tx)
+	})
 }
 
 func (channel *Channel) Update() error {
@@ -594,14 +614,18 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
-	if err != nil {
-		return err
-	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
-	return err
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := validateChannelProvider(tx, channel, false); err != nil {
+			return err
+		}
+		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.First(channel, "id = ?", channel.Id).Error; err != nil {
+			return err
+		}
+		return channel.UpdateAbilities(tx)
+	})
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {

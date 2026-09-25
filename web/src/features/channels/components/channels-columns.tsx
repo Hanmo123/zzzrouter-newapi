@@ -46,6 +46,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import type { Provider } from '@/features/providers/types'
 import { toIntlLocale } from '@/i18n/languages'
 import {
   formatCurrencyFromUSD,
@@ -618,11 +619,19 @@ export function BalanceCell({ channel }: { channel: Channel }) {
 export function useChannelsColumns(
   options: {
     enableSelection?: boolean
+    providers?: Provider[]
   } = {}
 ): ColumnDef<Channel>[] {
   const { t, i18n } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const enableSelection = options.enableSelection ?? true
+  const providerNames = useMemo(
+    () =>
+      new Map(
+        options.providers?.map((provider) => [provider.id, provider.name])
+      ),
+    [options.providers]
+  )
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   // The column definitions only depend on the translation function, the active
   // locale, and sensitive-data visibility. Memoizing keeps the array (and every
@@ -793,6 +802,32 @@ export function useChannelsColumns(
       },
 
       // Type column
+      {
+        accessorKey: 'provider_id',
+        header: t('Provider'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          const id = row.original.provider_id
+          return (
+            <span className='line-clamp-2 max-w-48 break-words'>
+              {id ? (providerNames.get(id) ?? `#${id}`) : '—'}
+            </span>
+          )
+        },
+      },
+      {
+        accessorKey: 'upstream_ratio',
+        header: t('Upstream ratio'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          // formatNumber rounds to 2 decimals, which would lose small commercial multipliers.
+          return new Intl.NumberFormat(locale, {
+            maximumSignificantDigits: 15,
+          }).format(row.original.upstream_ratio ?? 1)
+        },
+      },
       {
         accessorKey: 'type',
         header: t('Type'),
@@ -1264,6 +1299,6 @@ export function useChannelsColumns(
         meta: { pinned: 'right' as const },
       },
     ],
-    [enableSelection, t, locale, sensitiveVisible]
+    [enableSelection, t, locale, sensitiveVisible, providerNames]
   )
 }

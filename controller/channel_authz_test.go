@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -36,6 +37,16 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 			"models": updated.Models,
 			"group":  updated.Group,
 		}))
+	})
+
+	t.Run("provider metadata is editable without secret access", func(t *testing.T) {
+		updated := PatchChannel{Channel: *origin}
+		updated.ProviderID = 7
+		ratio := 0.5
+		updated.UpstreamRatio = &ratio
+		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "upstream_ratio": ratio}))
+		updated.Key = "new-key"
+		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "key": updated.Key}))
 	})
 
 	t.Run("key change", func(t *testing.T) {
@@ -149,6 +160,81 @@ func TestUpdateChannelRejectsStatusField(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.False(t, response.Success)
+}
+
+func TestChannelProviderFiltering(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	previousType := common.MainDatabaseType()
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	t.Cleanup(func() { common.SetMainDatabaseType(previousType) })
+	provider := model.Provider{Name: "reseller-a"}
+	require.NoError(t, provider.Save())
+	other := model.Provider{Name: "reseller-b"}
+	require.NoError(t, other.Save())
+	tag := "shared-tag"
+	channels := []model.Channel{
+		{Name: "match-one", Type: 1, Key: "secret-one", ProviderID: provider.ID, Models: "model-a", Group: "default", Tag: &tag},
+		{Name: "match-two", Type: 1, Key: "secret-two", ProviderID: provider.ID, Models: "model-a", Group: "default", Tag: &tag},
+		{Name: "match-other", Type: 2, Key: "secret-other", ProviderID: other.ID, Models: "model-a", Group: "default", Tag: &tag},
+	}
+	require.NoError(t, model.BatchInsertChannels(channels))
+	for _, search := range []bool{false, true} {
+		for _, tagMode := range []bool{false, true} {
+			t.Run(fmt.Sprintf("search=%t/tag=%t", search, tagMode), func(t *testing.T) {
+				url := fmt.Sprintf("/api/channel/?provider_id=%d&page_size=1&tag_mode=%t", provider.ID, tagMode)
+				recorder := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(recorder)
+				ctx.Request = httptest.NewRequest(http.MethodGet, url, nil)
+				if search {
+					SearchChannels(ctx)
+				} else {
+					GetAllChannels(ctx)
+				}
+				var response struct {
+					Success bool `json:"success"`
+					Data    struct {
+						Items      []model.Channel `json:"items"`
+						Total      int             `json:"total"`
+						TypeCounts map[string]int  `json:"type_counts"`
+					} `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				require.True(t, response.Success, recorder.Body.String())
+				wantTotal, wantItems := 2, 1
+				if tagMode && !search {
+					wantTotal, wantItems = 1, 2 // list tag mode paginates tags
+				}
+				assert.Equal(t, wantTotal, response.Data.Total)
+				require.Len(t, response.Data.Items, wantItems)
+				assert.Equal(t, map[string]int{"1": 2}, response.Data.TypeCounts)
+				for _, channel := range response.Data.Items {
+					assert.Equal(t, provider.ID, channel.ProviderID)
+					assert.Empty(t, channel.Key)
+					require.NotNil(t, channel.UpstreamRatio)
+					assert.Equal(t, 1.0, *channel.UpstreamRatio)
+				}
+			})
+		}
+	}
+	for _, invalid := range []string{"", "0", "-1", "abc"} {
+		for _, handler := range []gin.HandlerFunc{GetAllChannels, SearchChannels} {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/?provider_id="+invalid, nil)
+			handler(ctx)
+			assert.Contains(t, recorder.Body.String(), `"success":false`)
+		}
+	}
+}
+
+func TestChannelProviderPatchRejectsExplicitEmptyValues(t *testing.T) {
+	for _, body := range []string{`{"id":1,"provider_id":0}`, `{"id":1,"provider_id":null}`, `{"id":1,"upstream_ratio":null}`} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", strings.NewReader(body))
+		UpdateChannel(ctx)
+		assert.Contains(t, recorder.Body.String(), `"success":false`)
+	}
 }
 
 func TestChannelStatusValidation(t *testing.T) {

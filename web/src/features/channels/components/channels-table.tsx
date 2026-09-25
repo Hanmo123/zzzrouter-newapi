@@ -42,6 +42,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { providerOptionsQuery } from '@/features/providers/api'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -133,6 +134,17 @@ export function ChannelsTable() {
       },
       { columnId: 'type', searchKey: 'type', type: 'array' },
       { columnId: 'group', searchKey: 'group', type: 'array' },
+      {
+        columnId: 'provider_id',
+        searchKey: 'provider_id',
+        type: 'array',
+        deserialize: (value) =>
+          typeof value === 'number' ? [String(value)] : [],
+        serialize: (value) => {
+          const selected = (value as string[])[0]
+          return selected ? Number(selected) : undefined
+        },
+      },
       { columnId: 'model', searchKey: 'model', type: 'string' },
     ],
   })
@@ -152,6 +164,14 @@ export function ChannelsTable() {
       return next
     })
   }
+
+  const providerFilter = (
+    columnFilters.find((filter) => filter.id === 'provider_id')?.value as
+      | string[]
+      | undefined
+  )?.[0]
+  const providerID = providerFilter ? Number(providerFilter) : undefined
+  const providers = useQuery(providerOptionsQuery)
 
   // Extract filters from column filters
   const statusFilter =
@@ -222,6 +242,7 @@ export function ChannelsTable() {
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
   const { data, isLoading, isFetching } = useQuery({
     queryKey: channelsQueryKeys.list({
+      provider_id: providerID,
       keyword: globalFilter,
       model: modelFilter,
       group:
@@ -246,6 +267,7 @@ export function ChannelsTable() {
       if (shouldSearch) {
         return requireServerSuccess(
           await searchChannels({
+            provider_id: providerID,
             keyword: globalFilter,
             model: modelFilter,
             group:
@@ -270,6 +292,7 @@ export function ChannelsTable() {
       } else {
         return requireServerSuccess(
           await getChannels({
+            provider_id: providerID,
             group:
               groupFilter.length > 0 && !groupFilter.includes('all')
                 ? groupFilter[0]
@@ -309,7 +332,10 @@ export function ChannelsTable() {
   const typeCounts = data?.data?.type_counts
 
   // Columns configuration
-  const columns = useChannelsColumns({ enableSelection: batchMode })
+  const columns = useChannelsColumns({
+    enableSelection: batchMode,
+    providers: providers.data,
+  })
 
   // React Table instance
   const { table } = useDataTable({
@@ -446,6 +472,15 @@ export function ChannelsTable() {
           />
         ),
         filters: [
+          {
+            columnId: 'provider_id',
+            title: t('Provider'),
+            singleSelect: true,
+            options: (providers.data ?? []).map((provider) => ({
+              label: `${provider.name} (#${provider.id})`,
+              value: String(provider.id),
+            })),
+          },
           {
             columnId: 'status',
             title: t('Status'),

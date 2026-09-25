@@ -36,6 +36,8 @@ export type ChannelInfo = z.infer<typeof channelInfoSchema>
 
 export const channelSchema = z.object({
   id: z.number(),
+  provider_id: z.number().optional(),
+  upstream_ratio: z.number().optional(),
   type: z.number(),
   key: z.string(),
   openai_organization: z.string().nullish(),
@@ -276,6 +278,7 @@ export type ChannelSortBy =
 export type ChannelSortOrder = 'asc' | 'desc'
 
 export interface GetChannelsParams {
+  provider_id?: number
   p?: number
   page_size?: number
   status?: string // 'enabled', 'disabled', or empty for all
@@ -288,6 +291,7 @@ export interface GetChannelsParams {
 }
 
 export interface SearchChannelsParams {
+  provider_id?: number
   keyword?: string
   group?: string
   model?: string

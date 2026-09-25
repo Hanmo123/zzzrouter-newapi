@@ -36,6 +36,14 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 	}
 }
 
+func registerProviderRoutes(apiRouter *gin.RouterGroup) {
+	providers := apiRouter.Group("/providers", middleware.AdminAuth())
+	providers.GET("/", middleware.RequirePermission(authz.ChannelRead), controller.ListProviders)
+	providers.POST("/", middleware.RequirePermission(authz.ChannelWrite), controller.SaveProvider)
+	providers.PUT("/:id", middleware.RequirePermission(authz.ChannelWrite), controller.SaveProvider)
+	providers.DELETE("/:id", middleware.RequirePermission(authz.ChannelWrite), controller.DeleteProvider)
+}
+
 var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/", permission: authz.ChannelRead, handler: controller.GetAllChannels},
 	{method: http.MethodGet, path: "/search", permission: authz.ChannelRead, handler: controller.SearchChannels},

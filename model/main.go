@@ -335,6 +335,7 @@ func migrateDB() error {
 	}
 
 	err := DB.AutoMigrate(
+		&Provider{},
 		&Channel{},
 		&Token{},
 		&User{},
@@ -372,6 +373,9 @@ func migrateDB() error {
 		&AuthzRole{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migrateChannelProviders(DB); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {

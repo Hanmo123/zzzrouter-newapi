@@ -207,6 +207,7 @@ import {
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
+import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
@@ -2569,6 +2570,8 @@ export function ChannelMutateDrawer({
             )}
           />
         </div>
+
+        <ChannelProviderFields control={form.control} />
 
         {!isEditing && (
           <FormField

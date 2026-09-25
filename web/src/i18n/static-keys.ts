@@ -19,6 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Provider name is required',
+  'Provider name must not exceed 128 characters',
+  'Provider description must not exceed 4096 characters',
+  'Upstream ratio must be greater than zero',
+  'the default provider cannot be deleted',
+  "reassign or delete this provider's channels first",
   'Task usage metadata is unavailable. Pricing details cannot be displayed.',
   'This expression cannot be expanded into a price table. View the original expression below.',
   'This operation is only supported for vLLM or SGLang channels',

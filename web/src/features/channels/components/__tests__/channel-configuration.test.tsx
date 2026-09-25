@@ -156,6 +156,9 @@ beforeEach(() => {
     },
   })
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/providers/') {
+      return { data: { success: true, data: { items: [], total: 0 } } }
+    }
     if (url === '/api/channel/42') {
       return { data: { success: true, data: editingChannel } }
     }

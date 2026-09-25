@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -72,6 +72,48 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   )
   return result
 }
+
+describe('provider sidebar visibility', () => {
+  it('shows the provider entry before channels only when channel read permission is granted', () => {
+    const { result } = sidebarFor()
+    expect(
+      result.current
+        .flatMap((group) => group.items)
+        .some((item) => item.title === 'Providers')
+    ).toBe(false)
+    act(() =>
+      useAuthStore.getState().auth.setUser({
+        id: 2,
+        username: 'operator',
+        role: 10,
+        permissions: {
+          admin_permissions: { channel: { read: true, write: false } },
+        },
+      })
+    )
+    const items =
+      result.current.find((group) => group.id === 'admin')?.items ?? []
+    const index = items.findIndex((item) => item.title === 'Providers')
+    expect(index).toBeGreaterThanOrEqual(0)
+    expect(items[index]).toMatchObject({ url: '/providers' })
+    expect(items[index + 1]).toMatchObject({ url: '/channels' })
+    expect(checkIsActive('/providers', items[index])).toBe(true)
+  })
+
+  it('honors the existing channel navigation visibility switch', () => {
+    const { result } = sidebarFor({ admin: { enabled: true, channel: false } })
+    act(() =>
+      useAuthStore
+        .getState()
+        .auth.setUser({ id: 1, username: 'root', role: 100 })
+    )
+    expect(
+      result.current
+        .flatMap((group) => group.items)
+        .some((item) => item.title === 'Providers')
+    ).toBe(false)
+  })
+})
 
 describe('security sidebar visibility', () => {
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
