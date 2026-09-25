@@ -59,6 +59,14 @@ type Channel struct {
 	// UpstreamRatio records the channel's upstream commercial multiplier (1 = base price).
 	// It is metadata only: it must not implicitly change customer billing or routing.
 	UpstreamRatio *float64 `json:"upstream_ratio" gorm:"not null;default:1"`
+	// PublicRatio is display-only and independent of upstream/customer billing.
+	PublicRatio *float64 `json:"public_ratio" gorm:"not null;default:1"`
+	// Nullable observations distinguish unknown from false/zero. These do not
+	// change Status, routing, or the legacy test_time/response_time fields.
+	IsDegraded    *bool  `json:"is_degraded"`
+	IsOnline      *bool  `json:"is_online"`
+	TTFTMs        *int64 `json:"ttft_ms" gorm:"type:bigint"`
+	LastCheckedAt *int64 `json:"last_checked_at" gorm:"type:bigint"` // Unix seconds
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
@@ -355,6 +363,9 @@ func (channel *Channel) GetAutoBan() bool {
 }
 
 func (channel *Channel) Save() error {
+	if err := channel.validateMetadata(true); err != nil {
+		return err
+	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		// Save may insert a record as well as replace one; normalize the full
 		// record so this internal path cannot persist an unassigned channel.
@@ -476,6 +487,10 @@ func BatchInsertChannels(channels []Channel) error {
 	}()
 
 	for i := range channels {
+		if err := channels[i].validateMetadata(true); err != nil {
+			tx.Rollback()
+			return err
+		}
 		if err := validateChannelProvider(tx, &channels[i], true); err != nil {
 			tx.Rollback()
 			return err
@@ -564,6 +579,9 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
+	if err := channel.validateMetadata(true); err != nil {
+		return err
+	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		if err := validateChannelProvider(tx, channel, true); err != nil {
 			return err
@@ -575,7 +593,26 @@ func (channel *Channel) Insert() error {
 	})
 }
 
-func (channel *Channel) Update() error {
+// Update preserves omitted fields. Explicitly supplied observation fields can
+// also be reset to SQL NULL; the allowlist prevents arbitrary column updates.
+func (channel *Channel) Update(observationFields ...string) error {
+	if err := channel.validateMetadata(false); err != nil {
+		return err
+	}
+	observations := map[string]any{
+		"is_degraded":     channel.IsDegraded,
+		"is_online":       channel.IsOnline,
+		"ttft_ms":         channel.TTFTMs,
+		"last_checked_at": channel.LastCheckedAt,
+	}
+	updates := make(map[string]any, len(observationFields))
+	for _, field := range observationFields {
+		value, ok := observations[field]
+		if !ok {
+			return fmt.Errorf("invalid observation field: %s", field)
+		}
+		updates[field] = value
+	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -621,6 +658,14 @@ func (channel *Channel) Update() error {
 		if err := tx.Model(channel).Updates(channel).Error; err != nil {
 			return err
 		}
+		if len(updates) > 0 {
+			if err := tx.Model(channel).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		// Reset pointer fields before reloading: scanning SQL NULL into an
+		// already populated struct must not retain its previous observation.
+		channel.IsDegraded, channel.IsOnline, channel.TTFTMs, channel.LastCheckedAt = nil, nil, nil, nil
 		if err := tx.First(channel, "id = ?", channel.Id).Error; err != nil {
 			return err
 		}

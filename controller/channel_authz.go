@@ -118,9 +118,14 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 // to the fail-closed branch and is treated as sensitive. The
 // TestChannelFieldsAreClassified guard test enforces this.
 var channelNonSensitiveFields = map[string]struct{}{
-	// Commercial metadata only; neither field grants access or changes billing.
+	// Display/observation metadata does not grant access or change billing/routing.
 	"provider_id":         {},
 	"upstream_ratio":      {},
+	"public_ratio":        {},
+	"is_degraded":         {},
+	"is_online":           {},
+	"ttft_ms":             {},
+	"last_checked_at":     {},
 	"id":                  {},
 	"test_model":          {},
 	"name":                {},

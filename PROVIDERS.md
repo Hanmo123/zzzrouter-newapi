@@ -20,6 +20,33 @@ Provider（购买/接入服务的服务商）
 - 后续新增可查询的稳定属性时使用独立字段/关联表；不把所有商业、性能、测评数据塞进 `settings` 或 Provider 的 JSON 中。
 - Provider 名称是可修改的展示信息，不作为关联键。内部唯一 `code` 用于保持默认 Provider 的身份，普通 Provider 由服务端生成；API 不允许写入该字段。
 
+## 渠道公开展示与检测快照
+
+渠道新增以下独立列，列表、搜索和详情 API 均返回这些字段；控制台表格、卡片及新增/编辑表单同步支持：
+
+| JSON 字段 | 类型 / 默认值 | 语义 |
+| --- | --- | --- |
+| `public_ratio` | 有限正数，默认 `1` | 对外展示倍率，与 `upstream_ratio` 独立，不参与用户计费、上游结算或路由 |
+| `is_degraded` | `boolean \| null`，默认 `null` | 是否降智；`true` 降智、`false` 未降智、`null` 未知 |
+| `is_online` | `boolean \| null`，默认 `null` | 是否可调用/在线的观测结果；与管理员控制的 `status` 独立 |
+| `ttft_ms` | 非负整数毫秒或 `null`，默认 `null` | 首个有效输出 token 的延迟；`0` 是已知数值，不代表未知 |
+| `last_checked_at` | Unix 秒或 `null`，默认 `null` | 最近检测时间，范围 `0..253402300799`；控制台按本地时区显示和编辑，保留秒精度 |
+
+- 新建渠道与历史渠道的公开倍率默认 `1`，四个检测字段默认未知，不将无检测记录的渠道标记为在线或未降智。
+- 部分更新省略字段保留原值；四个检测字段显式传 `null` 清空为未知，`false` 和 `0` 正常写入。更新 `public_ratio` 不能传 `null`、零或负数；创建时未设置倍率使用默认值。
+- 这五个字段属于 `channel.write` 可编辑的非敏感元数据；服务器保持既有密钥、渠道启停权限边界，审计记录变更字段名。
+- 复制渠道继承 Provider、上游倍率、公开倍率，但清空检测快照；副本必须重新检测，不能继承原渠道的健康结论。
+- 这里只保存当前快照，管理员可手工录入或经既有渠道 API 更新；**尚未新增自动检测、TTFT 采集、降智判定算法或公开渠道接口**。公开倍率为后续对外展示提供明确字段，不会将带凭据的管理员接口公开。
+- 原有 `response_time` / `test_time` 继续表达旧渠道测试结果，不会冒充 TTFT 或覆盖这四个新字段。检测字段更新也不会自动修改渠道启停或路由。
+- 后续测评仍须使用独立不可变历史记录。该布尔快照不能表达疑似降智、置信度或证据，不能代替下文的完整测评状态。
+- 时间输入复用 `Input` 的原生 `datetime-local`，因为现有 `DateTimePicker` 仅支持分钟；其余字段复用 `FormField` / `Combobox` / `Input`，卡片复用表格列渲染器。
+
+例如只更新一次观测而不改变公开倍率或启停状态：
+
+```json
+{"id": 123, "is_degraded": null, "is_online": true, "ttft_ms": 350, "last_checked_at": 1700000123}
+```
+
 ## 控制台入口
 
 - 管理员侧边栏在“渠道”前新增“服务商”（`/providers`）；使用已有 `channel.read` 权限，沿用 `admin.channel` 导航显示开关。只读管理员可浏览，无 `channel.write` 权限时不显示新增、编辑、删除动作；直接访问页面同样校验管理员身份和读取权限，后端仍是最终权限边界。
@@ -31,11 +58,11 @@ Provider（购买/接入服务的服务商）
 
 ## 迁移与兼容
 
-- 主数据库 AutoMigrate 增加 `providers`、`channels.provider_id` 索引与 `channels.upstream_ratio`。
+- 主数据库 AutoMigrate 增加 `providers`、`channels.provider_id` 索引与 `channels.upstream_ratio`，以及上表五个渠道展示/观测字段；没有修改日志库。
 - 迁移在事务内创建真实的默认 Provider，并将历史 `provider_id=0/NULL` 的渠道归入该 Provider。原 Key、模型、多 Key 状态、路由和计费设置不变。
 - 旧客户端创建渠道时不传 `provider_id`（或传 0），仍会归入默认 Provider；新接入建议明确指定实际 Provider。
 - 更新渠道时省略 `provider_id` / `upstream_ratio` 保留原值；显式提交无效 Provider、`provider_id=0/null` 或 `upstream_ratio=0/null/负数` 被拒绝。
-- 单独创建、批量创建、复制渠道及内部完整 `Save` 走相同的 Provider 存在性校验。复制继承原 Provider 和上游倍率。
+- 单独创建、批量创建、复制渠道及内部完整 `Save` 走相同的 Provider 与渠道元数据校验。复制继承商业配置，检测快照重置为未知。
 - 删除仍被渠道引用的 Provider 会失败，必须先迁移或删除渠道；默认 Provider 不可删除。
 - Provider 使用软删除，保留历史身份。渠道归属写入与 Provider 删除在事务中锁定相同 Provider 行，避免并发分配导致悬空引用。SQLite 使用已有 `lockForUpdate` 的单写者兼容行为。
 - 当前遵循项目的应用层关联校验模式，不新增物理外键；直接写数据库或直接 `DB.Create(Channel)` 的外部程序必须遵守相同约束。业务入口应使用 `Insert` / `BatchInsertChannels` / `Update`。
@@ -116,9 +143,19 @@ Provider 写入记录管理审计。请求体不能覆盖 ID、创建时间、�
 
 ## 验证与安全边界
 
+### 渠道展示/检测字段扩展
+
+- `model/channel_metadata_test.go` 的 `TestChannelMetadataDatabaseMatrix` 验证 SQLite **3.50.4**、MySQL **8.0.46-0ubuntu0.24.04.4**、PostgreSQL **16.15** 的新库、从上一版 Provider-enabled Channel 结构重建的升级库及重复迁移；覆盖默认值、未知/false/零、部分更新、显式清空、独立启停状态、原多 Key 数据与索引、完整保存及批量原子性。
+- 独立测试库中设置 `TEST_MYSQL_DSN` / `TEST_POSTGRES_DSN` 后运行 `go test ./model -run TestChannelMetadataDatabaseMatrix -count=1 -v`，三个实际数据库全部通过。仅对这一矩阵传入临时 DSN，避免与其他矩阵的 TCP/URL DSN 格式约定混用。
+- 不设置上述 DSN 时，根模块 `go test ./...` 通过；SQLite API 回归在 `controller/channel_authz_test.go` 中覆盖输入类型/范围、省略与 null 语义、普通写权限与密钥保护、复制后检测字段重置。
+- 前端 `bun run test src/features/providers src/features/channels src/hooks/__tests__/sidebar-config.test.tsx`：**24 个文件、314 个测试通过**，包含桌面表格/移动卡片展示、三态选择、零毫秒、秒精度时间和清空、创建/编辑 payload。`bun run typecheck`、变更文件 oxlint、生产 `bun run build` 通过。
+- 未新增检测执行器、公开访问接口或历史记录表；未改变认证、密钥存储、计费与路由。没有对生产备份或最低版本数据库进行升级演练；发布仍需针对实际部署备份验证。
+
+### 服务商入口阶段
+
 前端回归位于 `web/src/features/providers/__tests__/management.test.tsx`、`web/src/features/channels/components/__tests__/channel-provider-fields.test.tsx` 和既有侧边栏测试，覆盖管理操作、服务端业务失败、只读权限、直达路由拒绝、未保存保护、重复提交、选项分页、渠道筛选、多 Key 表单保留以及语言切换。
 
-本次前端验证：`bun run typecheck`、变更文件的 oxlint、生产 `bun run build` 通过；`bun run test src/features/providers src/features/channels src/hooks/__tests__/sidebar-config.test.tsx` 共 24 个文件、305 个测试通过。全量 `bun run test --maxWorkers=2` 为 2110 通过、2 个使用日志本地化测试超时；对 `HEAD:web` 的独立基线目录复测，`detail-preview.test.tsx` 和 `quota-adjustment.test.tsx` 的相同用例仍然超时，未扩大范围修改这些既有测试。全仓版权检查也存在既有文件缺少头信息，本次新增前端文件均已补齐，未批量修改其他文件。
+服务商入口阶段前端验证：`bun run typecheck`、变更文件的 oxlint、生产 `bun run build` 通过；`bun run test src/features/providers src/features/channels src/hooks/__tests__/sidebar-config.test.tsx` 共 24 个文件、305 个测试通过。全量 `bun run test --maxWorkers=2` 为 2110 通过、2 个使用日志本地化测试超时；对 `HEAD:web` 的独立基线目录复测，`detail-preview.test.tsx` 和 `quota-adjustment.test.tsx` 的相同用例仍然超时，未扩大范围修改这些既有测试。全仓版权检查也存在既有文件缺少头信息，本次新增前端文件均已补齐，未批量修改其他文件。
 
 后端验证代码：`model/provider_test.go`、现有 `controller/channel_authz_test.go` 和 `router/channel_router_test.go`。覆盖关联校验、批量原子性、多 Key 保留、软删除、默认归属、部分更新、倍率边界、筛选分页和统计、真实路由权限链、只读字段注入。
 
@@ -129,7 +166,7 @@ go test ./model -run TestProviderDatabaseMatrix -count=1 -v
 go test ./model ./controller ./router
 ```
 
-本次实际验证结果：
+服务商入口阶段实际验证结果：
 
 | 命令 / 环境 | 结果 |
 | --- | --- |

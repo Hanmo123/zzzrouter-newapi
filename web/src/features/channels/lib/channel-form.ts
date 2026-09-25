@@ -205,6 +205,23 @@ export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
     provider_id: z.number().int().positive().optional(),
+    public_ratio: z
+      .number({ error: 'Public ratio must be greater than zero' })
+      .positive('Public ratio must be greater than zero')
+      .optional(),
+    is_degraded: z.boolean().nullish(),
+    is_online: z.boolean().nullish(),
+    ttft_ms: z
+      .number({ error: 'TTFT must be a non-negative integer in milliseconds' })
+      .int('TTFT must be a non-negative integer in milliseconds')
+      .nonnegative('TTFT must be a non-negative integer in milliseconds')
+      .nullish(),
+    last_checked_at: z
+      .number({ error: 'Invalid last checked time' })
+      .int('Invalid last checked time')
+      .min(0, 'Invalid last checked time')
+      .max(253402300799, 'Invalid last checked time')
+      .nullish(),
     upstream_ratio: z
       .number({ error: 'Upstream ratio must be greater than zero' })
       .finite('Upstream ratio must be greater than zero')
@@ -435,6 +452,11 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   provider_id: undefined,
   upstream_ratio: 1,
+  public_ratio: 1,
+  is_degraded: null,
+  is_online: null,
+  ttft_ms: null,
+  last_checked_at: null,
   type: 1,
   base_url: '',
   task_plugin_key: '',
@@ -601,6 +623,11 @@ export function transformChannelToFormDefaults(
     name: channel.name || '',
     provider_id: channel.provider_id || undefined,
     upstream_ratio: channel.upstream_ratio ?? 1,
+    public_ratio: channel.public_ratio ?? 1,
+    is_degraded: channel.is_degraded ?? null,
+    is_online: channel.is_online ?? null,
+    ttft_ms: channel.ttft_ms ?? null,
+    last_checked_at: channel.last_checked_at ?? null,
     type: channel.type,
     base_url: channel.base_url || '',
     key: '', // Never populate key from backend for security
@@ -856,6 +883,11 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     name: formData.name,
     provider_id: formData.provider_id,
     upstream_ratio: formData.upstream_ratio ?? 1,
+    public_ratio: formData.public_ratio ?? 1,
+    is_degraded: formData.is_degraded,
+    is_online: formData.is_online,
+    ttft_ms: formData.ttft_ms,
+    last_checked_at: formData.last_checked_at,
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,
     key: formData.key,
@@ -906,6 +938,11 @@ export function transformFormDataToUpdatePayload(
     id: channelId,
     provider_id: formData.provider_id,
     upstream_ratio: formData.upstream_ratio ?? 1,
+    public_ratio: formData.public_ratio ?? 1,
+    is_degraded: formData.is_degraded,
+    is_online: formData.is_online,
+    ttft_ms: formData.ttft_ms,
+    last_checked_at: formData.last_checked_at,
     name: formData.name,
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,

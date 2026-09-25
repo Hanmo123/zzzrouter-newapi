@@ -26,7 +26,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useForm } from 'react-hook-form'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -45,6 +45,7 @@ import {
   transformFormDataToUpdatePayload,
 } from '../../lib/channel-form'
 import { channelSchema } from '../../types'
+import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelsProvider } from '../channels-provider'
 import { ChannelsTable } from '../channels-table'
@@ -65,6 +66,7 @@ function ChannelForm(props: { onSave: (data: unknown) => void }) {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(props.onSave)}>
         <ChannelProviderFields control={form.control} />
+        <ChannelObservationFields control={form.control} />
         <Button type='submit'>Save channel</Button>
       </form>
     </Form>
@@ -100,90 +102,216 @@ afterEach(() => {
 })
 
 describe('channel provider configuration', () => {
-  it('applies the provider URL filter to listing and search requests, and clears it with Reset', async () => {
-    useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
-    localStorage.setItem('channel-status-filter', 'disabled')
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
-      if (url === '/api/providers/') {
-        return {
-          data: { success: true, data: { items: [first, second], total: 2 } },
-        }
-      }
-      if (url === '/api/group/') {
-        return { data: { success: true, data: ['default'] } }
-      }
-      return {
-        data: { success: true, data: { items: [], total: 0, type_counts: {} } },
-      }
+  it('edits tri-state observations, preserves zero TTFT, and clears unknown measurements', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { items: [first], total: 1 } },
     })
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-    const root = createRootRoute({ component: Outlet })
-    const layout = createRoute({
-      getParentRoute: () => root,
-      id: '_authenticated',
-      component: Outlet,
-    })
-    const page = createRoute({
-      getParentRoute: () => layout,
-      path: 'channels/',
-      validateSearch: ChannelsRoute.options.validateSearch,
-      component: () => (
-        <ChannelsProvider>
-          <ChannelsTable />
-        </ChannelsProvider>
-      ),
-    })
-    const router = createRouter({
-      routeTree: root.addChildren([layout.addChildren([page])]),
-      history: createMemoryHistory({
-        initialEntries: ['/channels?provider_id=3&status=%5B%22all%22%5D'],
-      }),
-    })
-    await router.load()
-    render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    )
-    await waitFor(() =>
-      expect(get).toHaveBeenCalledWith(
-        '/api/channel',
-        expect.objectContaining({
-          params: expect.objectContaining({
-            provider_id: 3,
-            status: undefined,
-          }),
-        })
-      )
-    )
+    const save = await renderFields()
     const user = userEvent.setup()
-    await user.type(
-      screen.getByPlaceholderText('Filter by name, ID, or key...'),
-      'test'
-    )
+    const ratio = screen.getByRole('spinbutton', { name: 'Public ratio' })
+    await user.clear(ratio)
+    await user.type(ratio, '0')
+    await user.click(screen.getByRole('button', { name: 'Save channel' }))
+    expect(
+      await screen.findByText('Public ratio must be greater than zero')
+    ).toBeVisible()
+    expect(save).not.toHaveBeenCalled()
+    await user.clear(ratio)
+    await user.type(ratio, '0.0125')
+    const online = screen.getByRole('combobox', { name: 'Callable (online)' })
+    expect(online).toHaveValue('Unknown')
+    await user.click(online)
+    await user.click(screen.getByRole('option', { name: 'Offline' }))
+    await user.click(screen.getByRole('combobox', { name: 'Is degraded' }))
+    await user.click(screen.getByRole('option', { name: 'Not degraded' }))
+    const ttft = screen.getByRole('spinbutton', {
+      name: 'Time to first token (ms)',
+    })
+    await user.type(ttft, '0')
+    const checked = screen.getByLabelText('Last checked')
+    fireEvent.change(checked, { target: { value: '2026-09-24T12:34:56' } })
+    await user.click(screen.getByRole('button', { name: 'Save channel' }))
     await waitFor(() =>
-      expect(get).toHaveBeenCalledWith(
-        '/api/channel/search',
+      expect(save).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          params: expect.objectContaining({ provider_id: 3, keyword: 'test' }),
-        })
+          public_ratio: 0.0125,
+          is_online: false,
+          is_degraded: false,
+          ttft_ms: 0,
+          last_checked_at: new Date('2026-09-24T12:34:56').getTime() / 1000,
+        }),
+        expect.anything()
       )
     )
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    await user.clear(ttft)
+    fireEvent.change(checked, { target: { value: '' } })
+    await user.click(online)
+    await user.click(screen.getByRole('option', { name: 'Unknown' }))
+    await user.click(screen.getByRole('button', { name: 'Save channel' }))
     await waitFor(() =>
-      expect(router.state.location.search).not.toHaveProperty('provider_id')
-    )
-    await waitFor(() =>
-      expect(get).toHaveBeenCalledWith(
-        '/api/channel',
+      expect(save).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          params: expect.objectContaining({ provider_id: undefined }),
-        })
+          is_online: null,
+          is_degraded: false,
+          ttft_ms: null,
+          last_checked_at: null,
+        }),
+        expect.anything()
       )
     )
   })
+
+  it.each([
+    { public_ratio: Number.POSITIVE_INFINITY },
+    { public_ratio: -1 },
+    { ttft_ms: -1 },
+    { ttft_ms: 0.5 },
+    { last_checked_at: -1 },
+    { last_checked_at: 253402300800 },
+  ])(
+    'rejects invalid observation values %j before building a payload',
+    (invalid) => {
+      expect(
+        channelFormSchema.safeParse({
+          ...CHANNEL_FORM_DEFAULT_VALUES,
+          name: 'channel',
+          models: 'model-a',
+          key: 'key',
+          ...invalid,
+        }).success
+      ).toBe(false)
+    }
+  )
+
+  it.each([false, true])(
+    'displays observation fields and retains provider filtering in mobile=%s',
+    async (mobile) => {
+      const matchMedia = window.matchMedia.bind(window)
+      vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+        ...matchMedia(query),
+        matches: query.includes('max-width')
+          ? mobile
+          : matchMedia(query).matches,
+      }))
+      const channel = channelSchema.parse({
+        id: 1,
+        name: 'Observed channel',
+        key: '',
+        type: 1,
+        status: 2,
+        created_time: 0,
+        test_time: 0,
+        response_time: 0,
+        balance_updated_time: 0,
+        models: 'model-a',
+        provider_id: 3,
+        public_ratio: 0.0125,
+        is_online: false,
+        is_degraded: null,
+        ttft_ms: 0,
+        last_checked_at: 1700000123,
+      })
+      useAuthStore
+        .getState()
+        .auth.setUser({ id: 1, username: 'root', role: 100 })
+      localStorage.setItem('channel-status-filter', 'disabled')
+      const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+        if (url === '/api/providers/') {
+          return {
+            data: { success: true, data: { items: [first, second], total: 2 } },
+          }
+        }
+        if (url === '/api/group/') {
+          return { data: { success: true, data: ['default'] } }
+        }
+        return {
+          data: {
+            success: true,
+            data: { items: [channel], total: 1, type_counts: { '1': 1 } },
+          },
+        }
+      })
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const root = createRootRoute({ component: Outlet })
+      const layout = createRoute({
+        getParentRoute: () => root,
+        id: '_authenticated',
+        component: Outlet,
+      })
+      const page = createRoute({
+        getParentRoute: () => layout,
+        path: 'channels/',
+        validateSearch: ChannelsRoute.options.validateSearch,
+        component: () => (
+          <ChannelsProvider>
+            <ChannelsTable />
+          </ChannelsProvider>
+        ),
+      })
+      const router = createRouter({
+        routeTree: root.addChildren([layout.addChildren([page])]),
+        history: createMemoryHistory({
+          initialEntries: ['/channels?provider_id=3&status=%5B%22all%22%5D'],
+        }),
+      })
+      await router.load()
+      render(
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      )
+      await waitFor(() =>
+        expect(get).toHaveBeenCalledWith(
+          '/api/channel',
+          expect.objectContaining({
+            params: expect.objectContaining({
+              provider_id: 3,
+              status: undefined,
+            }),
+          })
+        )
+      )
+      const user = userEvent.setup()
+      expect(await screen.findByText('Offline')).toBeVisible()
+      expect(screen.getByText('0.0125')).toBeVisible()
+      expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0)
+      expect(screen.getByText('Time to first token (ms)')).toBeVisible()
+      if (mobile) {
+        expect(
+          screen.getByText('Time to first token (ms)').nextElementSibling
+        ).toHaveTextContent('0')
+      }
+      await user.type(
+        screen.getByPlaceholderText('Filter by name, ID, or key...'),
+        'test'
+      )
+      await waitFor(() =>
+        expect(get).toHaveBeenCalledWith(
+          '/api/channel/search',
+          expect.objectContaining({
+            params: expect.objectContaining({
+              provider_id: 3,
+              keyword: 'test',
+            }),
+          })
+        )
+      )
+      await user.click(screen.getByRole('button', { name: 'Reset' }))
+      await waitFor(() =>
+        expect(router.state.location.search).not.toHaveProperty('provider_id')
+      )
+      await waitFor(() =>
+        expect(get).toHaveBeenCalledWith(
+          '/api/channel',
+          expect.objectContaining({
+            params: expect.objectContaining({ provider_id: undefined }),
+          })
+        )
+      )
+    }
+  )
 
   it('loads every provider page, supports keyboard selection and preserves multi-key data', async () => {
     const get = vi
@@ -265,6 +393,11 @@ describe('channel provider configuration', () => {
       models: 'model-a',
       provider_id: 7,
       upstream_ratio: 0.0125,
+      public_ratio: 0.125,
+      is_degraded: false,
+      is_online: null,
+      ttft_ms: 0,
+      last_checked_at: 1700000123,
       channel_info: {
         is_multi_key: true,
         multi_key_size: 2,
@@ -272,6 +405,20 @@ describe('channel provider configuration', () => {
       },
     })
     const defaults = transformChannelToFormDefaults(channel)
+    const observations = {
+      public_ratio: 0.125,
+      is_degraded: false,
+      is_online: null,
+      ttft_ms: 0,
+      last_checked_at: 1700000123,
+    }
+    expect(defaults).toMatchObject(observations)
+    expect(transformFormDataToUpdatePayload(defaults, 5)).toMatchObject(
+      observations
+    )
+    expect(
+      transformFormDataToCreatePayload({ ...defaults, key: 'key-a' }).channel
+    ).toMatchObject(observations)
     expect(defaults).toMatchObject({ provider_id: 7, upstream_ratio: 0.0125 })
     expect(transformFormDataToUpdatePayload(defaults, 5)).toMatchObject({
       id: 5,

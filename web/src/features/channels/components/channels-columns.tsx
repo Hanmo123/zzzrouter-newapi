@@ -53,7 +53,8 @@ import {
   formatQuotaWithCurrency,
   getCurrencyLabel,
 } from '@/lib/currency'
-import { formatTimestampToDate } from '@/lib/format'
+import dayjs from '@/lib/dayjs'
+import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 import { truncateText } from '@/lib/utils'
@@ -826,6 +827,78 @@ export function useChannelsColumns(
           return new Intl.NumberFormat(locale, {
             maximumSignificantDigits: 15,
           }).format(row.original.upstream_ratio ?? 1)
+        },
+      },
+      {
+        accessorKey: 'public_ratio',
+        header: t('Public ratio'),
+        enableSorting: false,
+        cell: ({ row }) =>
+          isTagAggregateRow(row.original)
+            ? '—'
+            : new Intl.NumberFormat(locale, {
+                maximumSignificantDigits: 15,
+              }).format(row.original.public_ratio ?? 1),
+      },
+      {
+        accessorKey: 'is_degraded',
+        header: t('Is degraded'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          const value = row.original.is_degraded
+          if (value == null) return t('Unknown')
+          return (
+            <StatusBadge
+              label={value ? t('Degraded') : t('Not degraded')}
+              variant={value ? 'danger' : 'success'}
+              size='sm'
+              copyable={false}
+            />
+          )
+        },
+      },
+      {
+        accessorKey: 'is_online',
+        header: t('Callable (online)'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          const value = row.original.is_online
+          if (value == null) return t('Unknown')
+          return (
+            <StatusBadge
+              label={value ? t('Online') : t('Offline')}
+              variant={value ? 'success' : 'danger'}
+              size='sm'
+              copyable={false}
+            />
+          )
+        },
+      },
+      {
+        accessorKey: 'ttft_ms',
+        header: t('Time to first token (ms)'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          return row.original.ttft_ms == null
+            ? t('Unknown')
+            : formatNumber(row.original.ttft_ms, locale)
+        },
+      },
+      {
+        accessorKey: 'last_checked_at',
+        header: t('Last checked'),
+        enableSorting: false,
+        cell: ({ row }) => {
+          if (isTagAggregateRow(row.original)) return '—'
+          // Unlike legacy test_time, Unix epoch 0 is a valid observation time.
+          return row.original.last_checked_at == null
+            ? t('Unknown')
+            : dayjs
+                .unix(row.original.last_checked_at)
+                .format('YYYY-MM-DD HH:mm:ss')
         },
       },
       {

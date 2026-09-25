@@ -206,6 +206,7 @@ import {
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
+import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelQuickOptions } from '../channel-quick-options'
@@ -2572,6 +2573,7 @@ export function ChannelMutateDrawer({
         </div>
 
         <ChannelProviderFields control={form.control} />
+        <ChannelObservationFields control={form.control} />
 
         {!isEditing && (
           <FormField

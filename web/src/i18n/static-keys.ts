@@ -19,6 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Public ratio must be greater than zero',
+  'TTFT must be a non-negative integer in milliseconds',
+  'Invalid last checked time',
   'Provider name is required',
   'Provider name must not exceed 128 characters',
   'Provider description must not exceed 4096 characters',

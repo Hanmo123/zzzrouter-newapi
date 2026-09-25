@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1163,9 +1164,11 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiErrorMsg(c, "provider_id must be positive")
 		return
 	}
-	if value, provided := requestData["upstream_ratio"]; provided && value == nil {
-		common.ApiErrorMsg(c, "upstream_ratio cannot be null")
-		return
+	for _, field := range []string{"upstream_ratio", "public_ratio"} {
+		if value, provided := requestData[field]; provided && value == nil {
+			common.ApiErrorMsg(c, field+" cannot be null")
+			return
+		}
 	}
 
 	if channel.Type == constant.ChannelTypeTaskPlugin &&
@@ -1311,7 +1314,13 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
-	err = channel.Update()
+	var observationFields []string
+	for _, field := range []string{"is_degraded", "is_online", "ttft_ms", "last_checked_at"} {
+		if _, provided := requestData[field]; provided {
+			observationFields = append(observationFields, field)
+		}
+	}
+	err = channel.Update(observationFields...)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1327,6 +1336,20 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.UpstreamRatio != nil && (originChannel.UpstreamRatio == nil || *channel.UpstreamRatio != *originChannel.UpstreamRatio) {
 		changedFields = append(changedFields, "upstream_ratio")
+	}
+	for _, field := range []struct {
+		name              string
+		current, previous any
+	}{
+		{"public_ratio", channel.PublicRatio, originChannel.PublicRatio},
+		{"is_degraded", channel.IsDegraded, originChannel.IsDegraded},
+		{"is_online", channel.IsOnline, originChannel.IsOnline},
+		{"ttft_ms", channel.TTFTMs, originChannel.TTFTMs},
+		{"last_checked_at", channel.LastCheckedAt, originChannel.LastCheckedAt},
+	} {
+		if _, provided := requestData[field.name]; provided && !reflect.DeepEqual(field.current, field.previous) {
+			changedFields = append(changedFields, field.name)
+		}
 	}
 	if channel.Models != originChannel.Models {
 		changedFields = append(changedFields, "models")
@@ -1685,6 +1708,8 @@ func CopyChannel(c *gin.Context) {
 	clone.Name = origin.Name + suffix
 	clone.TestTime = 0
 	clone.ResponseTime = 0
+	// A new channel inherits commercial terms, not another channel's observations.
+	clone.IsDegraded, clone.IsOnline, clone.TTFTMs, clone.LastCheckedAt = nil, nil, nil, nil
 	if resetBalance {
 		clone.Balance = 0
 		clone.UsedQuota = 0

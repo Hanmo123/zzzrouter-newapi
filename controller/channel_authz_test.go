@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,12 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "upstream_ratio": ratio}))
 		updated.Key = "new-key"
 		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "key": updated.Key}))
+	})
+
+	t.Run("display and observation fields do not require secret access", func(t *testing.T) {
+		for _, field := range []string{"public_ratio", "is_degraded", "is_online", "ttft_ms", "last_checked_at"} {
+			assert.False(t, channelHasSensitiveChanges(&PatchChannel{}, origin, map[string]any{field: nil}), field)
+		}
 	})
 
 	t.Run("key change", func(t *testing.T) {
@@ -235,6 +242,103 @@ func TestChannelProviderPatchRejectsExplicitEmptyValues(t *testing.T) {
 		UpdateChannel(ctx)
 		assert.Contains(t, recorder.Body.String(), `"success":false`)
 	}
+}
+
+func TestChannelObservationPatchContract(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	require.NoError(t, authz.SetUserPermissions(2, authz.PermissionsMap{"channel": {"read": true, "write": true, "sensitive_write": false}}))
+	require.False(t, authz.Can(2, common.RoleAdminUser, authz.ChannelSensitiveWrite))
+	channel := model.Channel{Name: "observed", Type: 1, Key: "preserved-secret", Models: "model-a", Group: "default", Status: common.ChannelStatusManuallyDisabled}
+	require.NoError(t, channel.Insert())
+	for _, scenario := range []struct {
+		name, fields string
+		success      bool
+	}{
+		{"observed false and zero", `"public_ratio":0.25,"is_degraded":true,"is_online":false,"ttft_ms":0,"last_checked_at":1700000123`, true},
+		{"omitted observations", `"name":"renamed"`, true},
+		{"invalid ratio", `"public_ratio":0`, false},
+		{"null ratio", `"public_ratio":null`, false},
+		{"negative ttft", `"ttft_ms":-1`, false},
+		{"fractional ttft", `"ttft_ms":0.5`, false},
+		{"invalid time", `"last_checked_at":-1`, false},
+		{"invalid boolean", `"is_online":"false"`, false},
+		{"cannot change credentials", `"is_online":true,"key":"forbidden-secret"`, false},
+		{"cannot change status", `"status":1,"is_online":true`, false},
+		{"clear observations", `"is_degraded":null,"is_online":null,"ttft_ms":null,"last_checked_at":null`, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("id", 2)
+			ctx.Set("role", common.RoleAdminUser)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/channel/", strings.NewReader(fmt.Sprintf(`{"id":%d,%s}`, channel.Id, scenario.fields)))
+			UpdateChannel(ctx)
+			var response struct {
+				Success bool          `json:"success"`
+				Data    model.Channel `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, scenario.success, response.Success, recorder.Body.String())
+			loaded, err := model.GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			assert.Equal(t, channel.Key, loaded.Key)
+			assert.Equal(t, channel.Status, loaded.Status)
+			require.NotNil(t, loaded.PublicRatio)
+			assert.Equal(t, 0.25, *loaded.PublicRatio)
+			if scenario.name == "clear observations" {
+				assert.Nil(t, loaded.IsDegraded)
+				assert.Nil(t, loaded.IsOnline)
+				assert.Nil(t, loaded.TTFTMs)
+				assert.Nil(t, loaded.LastCheckedAt)
+			} else {
+				require.NotNil(t, loaded.IsDegraded)
+				require.NotNil(t, loaded.IsOnline)
+				require.NotNil(t, loaded.TTFTMs)
+				require.NotNil(t, loaded.LastCheckedAt)
+				assert.True(t, *loaded.IsDegraded)
+				assert.False(t, *loaded.IsOnline)
+				assert.Zero(t, *loaded.TTFTMs)
+				assert.EqualValues(t, 1700000123, *loaded.LastCheckedAt)
+			}
+			if scenario.success {
+				assert.Empty(t, response.Data.Key)
+				assert.Equal(t, loaded.IsOnline, response.Data.IsOnline)
+				assert.Equal(t, loaded.TTFTMs, response.Data.TTFTMs)
+			}
+		})
+	}
+}
+
+func TestCopyChannelResetsObservations(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	ratio, flag, ttft, checked := 0.25, true, int64(12), int64(1700000123)
+	channel := model.Channel{Name: "copy source", Type: 1, Key: "secret-key", Models: "model-a", Group: "default", PublicRatio: &ratio, IsDegraded: &flag, IsOnline: &flag, TTFTMs: &ttft, LastCheckedAt: &checked}
+	require.NoError(t, channel.Insert())
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1)
+	ctx.Set("role", common.RoleRootUser)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(channel.Id)}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/copy/"+fmt.Sprint(channel.Id), nil)
+	CopyChannel(ctx)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID int `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, recorder.Body.String())
+	clone, err := model.GetChannelById(response.Data.ID, true)
+	require.NoError(t, err)
+	assert.NotEqual(t, channel.Id, clone.Id)
+	assert.Equal(t, channel.ProviderID, clone.ProviderID)
+	assert.Equal(t, channel.PublicRatio, clone.PublicRatio)
+	assert.Equal(t, channel.Key, clone.Key)
+	assert.Nil(t, clone.IsDegraded)
+	assert.Nil(t, clone.IsOnline)
+	assert.Nil(t, clone.TTFTMs)
+	assert.Nil(t, clone.LastCheckedAt)
 }
 
 func TestChannelStatusValidation(t *testing.T) {
