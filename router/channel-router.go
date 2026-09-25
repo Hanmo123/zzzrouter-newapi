@@ -36,6 +36,15 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 	}
 }
 
+// Public reads use separate controllers and response allowlists, never the
+// administrative channel serializer. The parent /api group supplies rate limits.
+func registerPublicCatalogRoutes(apiRouter *gin.RouterGroup) {
+	catalog := apiRouter.Group("/public", middleware.DisableCache())
+	catalog.GET("/providers", controller.ListPublicProviders)
+	catalog.GET("/providers/:id/channels", controller.ListPublicChannels)
+	catalog.GET("/channels", controller.ListPublicChannels)
+}
+
 func registerProviderRoutes(apiRouter *gin.RouterGroup) {
 	providers := apiRouter.Group("/providers", middleware.AdminAuth())
 	providers.GET("/", middleware.RequirePermission(authz.ChannelRead), controller.ListProviders)

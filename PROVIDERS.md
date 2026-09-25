@@ -2,7 +2,7 @@
 
 ## 本次落地范围
 
-已实现后端数据模型、迁移、管理 API、渠道筛选与校验，以及 new-api 内置控制台的服务商入口。尚未实现测评任务、测评表或自动质量路由。
+已实现后端数据模型、迁移、管理 API、渠道筛选与校验、匿名公开的服务商/渠道目录，以及 new-api 内置控制台的服务商入口。尚未实现测评任务、测评表或自动质量路由。
 
 ```text
 Provider（购买/接入服务的服务商）
@@ -36,7 +36,7 @@ Provider（购买/接入服务的服务商）
 - 部分更新省略字段保留原值；四个检测字段显式传 `null` 清空为未知，`false` 和 `0` 正常写入。更新 `public_ratio` 不能传 `null`、零或负数；创建时未设置倍率使用默认值。
 - 这五个字段属于 `channel.write` 可编辑的非敏感元数据；服务器保持既有密钥、渠道启停权限边界，审计记录变更字段名。
 - 复制渠道继承 Provider、上游倍率、公开倍率，但清空检测快照；副本必须重新检测，不能继承原渠道的健康结论。
-- 这里只保存当前快照，管理员可手工录入或经既有渠道 API 更新；**尚未新增自动检测、TTFT 采集、降智判定算法或公开渠道接口**。公开倍率为后续对外展示提供明确字段，不会将带凭据的管理员接口公开。
+- 这里只保存当前快照，管理员可手工录入或经既有渠道 API 更新；**尚未新增自动检测、TTFT 采集或降智判定算法**。公开展示通过下文的独立只读接口，不会将带凭据的管理员接口公开。
 - 原有 `response_time` / `test_time` 继续表达旧渠道测试结果，不会冒充 TTFT 或覆盖这四个新字段。检测字段更新也不会自动修改渠道启停或路由。
 - 后续测评仍须使用独立不可变历史记录。该布尔快照不能表达疑似降智、置信度或证据，不能代替下文的完整测评状态。
 - 时间输入复用 `Input` 的原生 `datetime-local`，因为现有 `DateTimePicker` 仅支持分钟；其余字段复用 `FormField` / `Combobox` / `Input`，卡片复用表格列渲染器。
@@ -67,6 +67,70 @@ Provider（购买/接入服务的服务商）
 - Provider 使用软删除，保留历史身份。渠道归属写入与 Provider 删除在事务中锁定相同 Provider 行，避免并发分配导致悬空引用。SQLite 使用已有 `lockForUpdate` 的单写者兼容行为。
 - 当前遵循项目的应用层关联校验模式，不新增物理外键；直接写数据库或直接 `DB.Create(Channel)` 的外部程序必须遵守相同约束。业务入口应使用 `Insert` / `BatchInsertChannels` / `Update`。
 - 启动迁移可重复执行。生产升级应先备份，迁移主节点完成后再启动其他节点；不支持回滚到旧版本继续写入而同时保持新约束。
+
+## 公开目录 API
+
+三个接口均为匿名只读 GET，继承 `/api` 全局限流，并设置 `Cache-Control: no-store`；不复用或放开已有管理员接口。
+
+| 路径 | 返回内容 |
+| --- | --- |
+| `/api/public/providers` | 当前筛选下有匹配渠道的服务商；仅 `id`、`name`、`channel_count`，按 ID 升序 |
+| `/api/public/providers/:id/channels` | 指定服务商的公开渠道分页列表 |
+| `/api/public/channels` | 全部公开渠道分页列表，可选 `provider_id` |
+
+### 分页、排序和筛选
+
+| 参数 | 默认值 | 允许值 / 行为 |
+| --- | --- | --- |
+| `p` | `1` | 正整数，最大 `10000` |
+| `page_size` | `20` | `1..100` |
+| `is_online` | `true` | `true`、`false`、`all`、`unknown` |
+| `is_degraded` | `false` | `true`、`false`、`all`、`unknown` |
+| `sort_by` | `public_ratio` | 仅渠道列表：`public_ratio`、`ttft`（亦接受 `ttft_ms`） |
+| `sort_order` | `asc` | 仅渠道列表：`asc` / `desc`，大小写不敏感 |
+| `provider_id` | 不限制 | 仅渠道列表：正整数；若同时存在路径 ID，必须一致 |
+
+- 默认只显示**在线且未降智**的渠道，两个条件均需明确的布尔观测；`NULL` 不视为在线或未降智。新/旧渠道默认没有观测，因此未填写结果前不会出现在默认列表。筛选不触发检测，也不保证实时可调用性。
+- `all` 取消对应观测条件，包含未知值；`unknown` 仅匹配 `NULL`。这两个参数也作用于服务商列表的可见性和 `channel_count`，不计入隐藏渠道。
+- 无论筛选如何设置，仅公开 `status=1` 的已启用渠道，且其 Provider 必须存在且未软删除。`all` 不会绕过后台停用、自动禁用或服务商删除。
+- TTFT 升序/降序均将未知值放末尾，零毫秒是有效值；相同排序值使用渠道 ID 升序保证稳定分页。
+- 不存在、已删除或没有匹配渠道的服务商渠道列表返回成功空页（`items: []`），不会暴露其内部记录；服务商目录不包含匹配数为零的服务商。
+- 非法、重复、空、未知参数，以及非法分页/排序/筛选返回 HTTP 400；不会默默丢弃筛选。数据库故障返回 HTTP 500 和固定安全提示，不透出数据库错误。
+
+示例：
+
+```text
+GET /api/public/providers
+GET /api/public/providers/123/channels?sort_by=ttft&sort_order=asc
+GET /api/public/channels?sort_by=public_ratio&sort_order=asc&p=1&page_size=20
+GET /api/public/channels?is_online=false&is_degraded=all
+GET /api/public/channels?is_online=all&is_degraded=all
+```
+
+响应沿用 `success/message/data`，分页数据包含 `page`、`page_size`、`total`、`items`。渠道条目严格限定为：
+
+```json
+{
+  "id": 1,
+  "provider_id": 123,
+  "provider_name": "Example provider",
+  "name": "Standard channel",
+  "type": 1,
+  "models": "model-a,model-b",
+  "public_ratio": 1.2,
+  "is_degraded": false,
+  "is_online": true,
+  "ttft_ms": 350,
+  "last_checked_at": 1700000123
+}
+```
+
+### 上游倍率和内部配置隔离
+
+- 使用独立的 `PublicProvider` / `PublicChannel` DTO 和 SQL 查询列白名单，**公开接口既不读取也不返回 `upstream_ratio`**，也不提供按该字段排序、筛选或投影的能力。
+- 不返回 API Key、上游 URL、模型映射、分组、Header/参数覆盖、配置 JSON、备注、余额、内部 Provider code/描述等字段。新增后台字段不会自动进入公开响应。
+- 公开的是服务商/渠道名称和对外模型名；运营时不要在这些展示名称中写入成本或凭据。任意自由文本的内容不能靠字段白名单自动识别或脱敏。
+- 管理员仍通过原有受 `AdminAuth` / `channel.read` 等权限保护的接口维护上游商业信息；公开目录没有写入或绕过这些权限的入口。目录中的可用性信息不授予调用模型或渠道的权限。
 
 ## 管理 API
 
@@ -143,13 +207,20 @@ Provider 写入记录管理审计。请求体不能覆盖 ID、创建时间、�
 
 ## 验证与安全边界
 
+### 公开目录接口阶段
+
+- 回归集中在 `router/public_catalog_test.go` 的 `TestPublicCatalogDatabaseMatrix`，通过真实 Gin 路由、控制器和数据库查询验证三个接口，覆盖默认/显式筛选、未知与零值、双向排序、稳定分页、过滤计数、服务商隔离、停用/软删除/孤儿数据、无权限管理员接口访问、私有字段白名单及故障信息不外泄。
+- 设置临时独立库 DSN 后，`go test ./router -run TestPublicCatalogDatabaseMatrix -count=1 -v` 在 SQLite **3.50.4**、MySQL **8.0.46-0ubuntu0.24.04.4**、PostgreSQL **16.15** 上全部通过。
+- 不设置临时矩阵 DSN 的根模块 `go test ./...`、修改文件的 `gofmt` 和 `git diff --check` 通过。本阶段无 schema、前端、计费或认证流程改动；未对最低版本数据库做验证。
+- 公共数据授权和字段隔离沿用下文 OWASP ASVS 5.0.0 的 8.1.1/8.1.2、8.2.3、8.3.1 及 Authorization Cheat Sheet：匿名访问仅限明确定义的公共投影，不以客户端隐藏字段代替服务器约束。
+
 ### 渠道展示/检测字段扩展
 
 - `model/channel_metadata_test.go` 的 `TestChannelMetadataDatabaseMatrix` 验证 SQLite **3.50.4**、MySQL **8.0.46-0ubuntu0.24.04.4**、PostgreSQL **16.15** 的新库、从上一版 Provider-enabled Channel 结构重建的升级库及重复迁移；覆盖默认值、未知/false/零、部分更新、显式清空、独立启停状态、原多 Key 数据与索引、完整保存及批量原子性。
 - 独立测试库中设置 `TEST_MYSQL_DSN` / `TEST_POSTGRES_DSN` 后运行 `go test ./model -run TestChannelMetadataDatabaseMatrix -count=1 -v`，三个实际数据库全部通过。仅对这一矩阵传入临时 DSN，避免与其他矩阵的 TCP/URL DSN 格式约定混用。
 - 不设置上述 DSN 时，根模块 `go test ./...` 通过；SQLite API 回归在 `controller/channel_authz_test.go` 中覆盖输入类型/范围、省略与 null 语义、普通写权限与密钥保护、复制后检测字段重置。
 - 前端 `bun run test src/features/providers src/features/channels src/hooks/__tests__/sidebar-config.test.tsx`：**24 个文件、314 个测试通过**，包含桌面表格/移动卡片展示、三态选择、零毫秒、秒精度时间和清空、创建/编辑 payload。`bun run typecheck`、变更文件 oxlint、生产 `bun run build` 通过。
-- 未新增检测执行器、公开访问接口或历史记录表；未改变认证、密钥存储、计费与路由。没有对生产备份或最低版本数据库进行升级演练；发布仍需针对实际部署备份验证。
+- 字段扩展阶段未新增检测执行器、公开访问接口或历史记录表；未改变认证、密钥存储、计费与路由。没有对生产备份或最低版本数据库进行升级演练；发布仍需针对实际部署备份验证。
 
 ### 服务商入口阶段
 
