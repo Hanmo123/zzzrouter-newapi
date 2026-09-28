@@ -77,7 +77,7 @@ Provider（购买/接入服务的服务商）
 | `/api/public/providers` | 当前筛选下有匹配渠道的服务商；仅 `id`、`name`、`channel_count`，按 ID 升序 |
 | `/api/public/providers/:id/channels` | 指定服务商的公开渠道分页列表 |
 | `/api/public/channels` | 全部公开渠道分页列表，可选 `provider_id` 和精确 `model` 筛选 |
-| `/api/public/models` | 当前可见渠道上的去重模型名称（`items: string[]`），可搜索、分页；仅从公开模型名称提取 |
+| `/api/public/models` | 当前可见渠道上的去重模型名称（`items: string[]`），可搜索、分页；另返回 `default_model`，仅从公开模型名称提取选项 |
 
 ### 分页、排序和筛选
 
@@ -113,7 +113,7 @@ GET /api/public/channels?is_online=false&is_degraded=all
 GET /api/public/channels?is_online=all&is_degraded=all
 ```
 
-响应沿用 `success/message/data`，分页数据包含 `page`、`page_size`、`total`、`items`。渠道条目严格限定为：
+响应沿用 `success/message/data`，分页数据包含 `page`、`page_size`、`total`、`items`。模型选项接口在 `data` 中额外返回 `default_model: "gpt-6-astra"`，目前在后端固定，未来再由控制台配置；即使该模型暂时没有匹配的已公开渠道，默认名称仍会返回。它不代表探测结果或可用性。渠道条目严格限定为：
 
 ```json
 {

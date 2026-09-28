@@ -11,6 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Until the console supports choosing the directory's featured model, keep its
+// default in the public API rather than independently hardcoding it in clients.
+const defaultPublicCatalogModel = "gpt-6-astra"
+
 // parsePublicCatalogQuery rejects ambiguous/unknown inputs instead of silently
 // dropping a filter. In particular, clients cannot request a private projection
 // or sort by upstream pricing. Administrative query helpers are not reused.
@@ -106,7 +110,13 @@ func ListPublicModels(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "public catalog is temporarily unavailable"})
 		return
 	}
-	common.ApiSuccess(c, &common.PageInfo{Page: query.Page, PageSize: query.PageSize, Total: int(total), Items: items})
+	common.ApiSuccess(c, &struct {
+		*common.PageInfo
+		DefaultModel string `json:"default_model"`
+	}{
+		PageInfo:     &common.PageInfo{Page: query.Page, PageSize: query.PageSize, Total: int(total), Items: items},
+		DefaultModel: defaultPublicCatalogModel,
+	})
 }
 
 func ListPublicProviders(c *gin.Context) {

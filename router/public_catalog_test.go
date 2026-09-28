@@ -288,6 +288,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					{"/api/public/models?p=2", []string{}, 7},
 					{"/api/public/models?page_size=2&p=2", []string{"model-a", "model-ab"}, 7},
 					{"/api/public/models?provider_id=102", []string{"model-c", "modela"}, 2},
+					{"/api/public/models?provider_id=103", []string{}, 0},
 					{"/api/public/models?search=MODEL-B", []string{"model-b"}, 1},
 					{"/api/public/models?search=m_%25", []string{"m_%"}, 1},
 					{"/api/public/models?is_online=unknown&is_degraded=unknown", []string{"model-a", "model-b"}, 2},
@@ -301,14 +302,16 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					var options struct {
 						Success bool `json:"success"`
 						Data    struct {
-							Total int      `json:"total"`
-							Items []string `json:"items"`
+							Total        int      `json:"total"`
+							Items        []string `json:"items"`
+							DefaultModel string   `json:"default_model"`
 						} `json:"data"`
 					}
 					require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &options))
 					assert.True(t, options.Success)
 					assert.Equal(t, scenario.total, options.Data.Total)
 					assert.Equal(t, scenario.models, options.Data.Items)
+					assert.Equal(t, "gpt-6-astra", options.Data.DefaultModel)
 				}
 			})
 
