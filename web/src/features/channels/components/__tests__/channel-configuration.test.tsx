@@ -162,6 +162,11 @@ beforeEach(() => {
     if (url === '/api/channel/42') {
       return { data: { success: true, data: editingChannel } }
     }
+    if (url === '/api/channel/42/degradation-exclusion') {
+      return {
+        data: { success: true, data: { skip_degradation_check: false } },
+      }
+    }
     if (url === '/api/channel/fetch_models/42') {
       return { data: { success: true, data: ['upstream-model'] } }
     }

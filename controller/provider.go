@@ -25,14 +25,18 @@ func SaveProvider(c *gin.Context) {
 	// Accept only mutable metadata; IDs, timestamps and deletion state cannot
 	// be injected through the request body.
 	var request struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name                 string `json:"name"`
+		Description          string `json:"description"`
+		SkipDegradationCheck *bool  `json:"skip_degradation_check"`
 	}
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	provider := model.Provider{Name: request.Name, Description: request.Description}
+	if request.SkipDegradationCheck != nil {
+		provider.SkipDegradationCheck = *request.SkipDegradationCheck
+	}
 	if c.Request.Method == "PUT" {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil || id <= 0 {
@@ -41,11 +45,11 @@ func SaveProvider(c *gin.Context) {
 		}
 		provider.ID = id
 	}
-	if err := provider.Save(); err != nil {
+	if err := provider.Save(request.SkipDegradationCheck); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAudit(c, "provider.save", map[string]any{"provider_id": provider.ID, "name": provider.Name})
+	recordManageAudit(c, "provider.save", map[string]any{"provider_id": provider.ID, "name": provider.Name, "skip_degradation_check": provider.SkipDegradationCheck})
 	common.ApiSuccess(c, provider)
 }
 

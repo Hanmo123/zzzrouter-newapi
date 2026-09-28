@@ -17,14 +17,15 @@ import (
 // Credentials and commercial terms belong to individual channels.
 // Soft deletion preserves provider identities for future evaluation history.
 type Provider struct {
-	ID           int            `json:"id"`
-	Code         string         `json:"-" gorm:"size:64;not null;uniqueIndex"`
-	Name         string         `json:"name" gorm:"size:128;not null;index"`
-	Description  string         `json:"description" gorm:"type:text"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	UpdatedTime  int64          `json:"updated_time" gorm:"bigint"`
-	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
-	ChannelCount int64          `json:"channel_count" gorm:"-"`
+	ID                   int            `json:"id"`
+	Code                 string         `json:"-" gorm:"size:64;not null;uniqueIndex"`
+	Name                 string         `json:"name" gorm:"size:128;not null;index"`
+	Description          string         `json:"description" gorm:"type:text"`
+	SkipDegradationCheck bool           `json:"skip_degradation_check"`
+	CreatedTime          int64          `json:"created_time" gorm:"bigint"`
+	UpdatedTime          int64          `json:"updated_time" gorm:"bigint"`
+	DeletedAt            gorm.DeletedAt `json:"-" gorm:"index"`
+	ChannelCount         int64          `json:"channel_count" gorm:"-"`
 }
 
 // migrateChannelProviders runs after AutoMigrate. Legacy clients that do
@@ -92,7 +93,7 @@ func validateChannelProvider(tx *gorm.DB, channel *Channel, create bool) error {
 	return nil
 }
 
-func (provider *Provider) Save() error {
+func (provider *Provider) Save(skipDegradation ...*bool) error {
 	provider.Name = strings.TrimSpace(provider.Name)
 	provider.Description = strings.TrimSpace(provider.Description)
 	if provider.Name == "" || utf8.RuneCountInString(provider.Name) > 128 {
@@ -116,7 +117,11 @@ func (provider *Provider) Save() error {
 			return err
 		}
 		provider.Code, provider.CreatedTime = saved.Code, saved.CreatedTime
-		return tx.Model(&saved).Updates(map[string]any{"name": provider.Name, "description": provider.Description, "updated_time": provider.UpdatedTime}).Error
+		provider.SkipDegradationCheck = saved.SkipDegradationCheck
+		if len(skipDegradation) > 0 && skipDegradation[0] != nil {
+			provider.SkipDegradationCheck = *skipDegradation[0]
+		}
+		return tx.Model(&saved).Updates(map[string]any{"name": provider.Name, "description": provider.Description, "skip_degradation_check": provider.SkipDegradationCheck, "updated_time": provider.UpdatedTime}).Error
 	})
 }
 

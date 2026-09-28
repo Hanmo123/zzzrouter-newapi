@@ -56,6 +56,8 @@ type Channel struct {
 	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
 
 	ProviderID int `json:"provider_id" gorm:"not null;default:0;index"`
+	// Channel-level opt-out; false/NULL remain eligible when the model is enabled.
+	SkipDegradationCheck bool `json:"-"`
 	// UpstreamRatio records the channel's upstream commercial multiplier (1 = base price).
 	// It is metadata only: it must not implicitly change customer billing or routing.
 	UpstreamRatio *float64 `json:"upstream_ratio" gorm:"not null;default:1"`
@@ -67,6 +69,9 @@ type Channel struct {
 	IsOnline      *bool  `json:"is_online"`
 	TTFTMs        *int64 `json:"ttft_ms" gorm:"type:bigint"`
 	LastCheckedAt *int64 `json:"last_checked_at" gorm:"type:bigint"` // Unix seconds
+
+	// Internal identity for immutable observations; never accepted from API JSON.
+	InstanceID *string `json:"-" gorm:"size:36;uniqueIndex"`
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
@@ -372,6 +377,19 @@ func (channel *Channel) Save() error {
 		if err := validateChannelProvider(tx, channel, true); err != nil {
 			return err
 		}
+		channel.InstanceID = nil
+		if channel.Id != 0 {
+			var stored Channel
+			err := lockForUpdate(tx).Select("id", "instance_id", "skip_degradation_check").First(&stored, channel.Id).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			channel.InstanceID = stored.InstanceID
+			channel.SkipDegradationCheck = stored.SkipDegradationCheck
+		}
+		if err := channel.BeforeCreate(tx); err != nil {
+			return err
+		}
 		return tx.Save(channel).Error
 	})
 }
@@ -487,6 +505,7 @@ func BatchInsertChannels(channels []Channel) error {
 	}()
 
 	for i := range channels {
+		channels[i].InstanceID = nil
 		if err := channels[i].validateMetadata(true); err != nil {
 			tx.Rollback()
 			return err
@@ -579,6 +598,7 @@ func (channel *Channel) GetStatusCodeMapping() string {
 }
 
 func (channel *Channel) Insert() error {
+	channel.InstanceID = nil
 	if err := channel.validateMetadata(true); err != nil {
 		return err
 	}
@@ -655,7 +675,7 @@ func (channel *Channel) Update(observationFields ...string) error {
 		if err := validateChannelProvider(tx, channel, false); err != nil {
 			return err
 		}
-		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+		if err := tx.Model(channel).Omit("InstanceID", "SkipDegradationCheck").Updates(channel).Error; err != nil {
 			return err
 		}
 		if len(updates) > 0 {

@@ -569,6 +569,31 @@ export function ModelMutateDrawer(props: {
 
                       <FormField
                         control={form.control}
+                        name='degradation_check_enabled'
+                        render={({ field }) => (
+                          <FormItem className={sideDrawerSwitchItemClassName()}>
+                            <div className='flex flex-col gap-0.5'>
+                              <FormLabel className='text-base'>
+                                {t('Enable degradation check for this model')}
+                              </FormLabel>
+                              <FormDescription>
+                                {t(
+                                  'Manual and scheduled checks include matching channel models. Scheduled checks also require DEGRADATION_CHECK_ENABLED=true on the server.'
+                                )}
+                              </FormDescription>
+                            </div>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
                         name='sync_official'
                         render={({ field }) => (
                           <FormItem className={sideDrawerSwitchItemClassName()}>

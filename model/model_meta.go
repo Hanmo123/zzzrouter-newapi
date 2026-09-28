@@ -33,19 +33,22 @@ type BoundChannel struct {
 }
 
 type Model struct {
-	Id                 int            `json:"id"`
-	ModelName          string         `json:"model_name" gorm:"size:128;not null;uniqueIndex:uk_model_name_delete_at,priority:1"`
-	Description        string         `json:"description,omitempty" gorm:"type:text"`
-	Icon               string         `json:"icon,omitempty" gorm:"type:varchar(128)"`
-	Tags               string         `json:"tags,omitempty" gorm:"type:varchar(255)"`
-	VendorID           int            `json:"vendor_id,omitempty" gorm:"index"`
-	Endpoints          string         `json:"endpoints,omitempty" gorm:"type:text"`
-	SupportedEndpoints []string       `json:"supported_endpoints,omitempty" gorm:"-"`
-	Status             int            `json:"status" gorm:"default:1"`
-	SyncOfficial       int            `json:"sync_official" gorm:"default:1"`
-	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
-	UpdatedTime        int64          `json:"updated_time" gorm:"bigint"`
-	DeletedAt          gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_model_name_delete_at,priority:2"`
+	Id                 int      `json:"id"`
+	ModelName          string   `json:"model_name" gorm:"size:128;not null;uniqueIndex:uk_model_name_delete_at,priority:1"`
+	Description        string   `json:"description,omitempty" gorm:"type:text"`
+	Icon               string   `json:"icon,omitempty" gorm:"type:varchar(128)"`
+	Tags               string   `json:"tags,omitempty" gorm:"type:varchar(255)"`
+	VendorID           int      `json:"vendor_id,omitempty" gorm:"index"`
+	Endpoints          string   `json:"endpoints,omitempty" gorm:"type:text"`
+	SupportedEndpoints []string `json:"supported_endpoints,omitempty" gorm:"-"`
+	Status             int      `json:"status" gorm:"default:1"`
+	SyncOfficial       int      `json:"sync_official" gorm:"default:1"`
+	// NULL (including migrated models) means disabled. Independent of routing
+	// and model-square visibility; old clients omitting this field preserve it.
+	DegradationCheckEnabled *bool          `json:"degradation_check_enabled"`
+	CreatedTime             int64          `json:"created_time" gorm:"bigint"`
+	UpdatedTime             int64          `json:"updated_time" gorm:"bigint"`
+	DeletedAt               gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_model_name_delete_at,priority:2"`
 
 	BoundChannels []BoundChannel `json:"bound_channels,omitempty" gorm:"-"`
 	EnableGroups  []string       `json:"enable_groups,omitempty" gorm:"-"`
@@ -264,8 +267,11 @@ func (mi *Model) Update() error {
 			return err
 		}
 		mi.UpdatedTime = common.GetTimestamp()
-		return tx.Model(&Model{}).Where("id = ?", mi.Id).
-			Select("model_name", "description", "icon", "tags", "vendor_id", "endpoints", "status", "sync_official", "name_rule", "updated_time").Updates(mi).Error
+		fields := []string{"model_name", "description", "icon", "tags", "vendor_id", "endpoints", "status", "sync_official", "name_rule", "updated_time"}
+		if mi.DegradationCheckEnabled != nil {
+			fields = append(fields, "degradation_check_enabled")
+		}
+		return tx.Model(&Model{}).Where("id = ?", mi.Id).Select(fields).Updates(mi).Error
 	})
 }
 

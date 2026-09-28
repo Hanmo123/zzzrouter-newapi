@@ -36,6 +36,8 @@ func TestChannelStatusRoutesUseExpectedPermissions(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/status", authz.ChannelOperate, controller.UpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/status/batch", authz.ChannelOperate, controller.BatchUpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/degradation-exclusion", authz.ChannelRead, controller.GetChannelDegradationExclusion)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/degradation-exclusion", authz.ChannelWrite, controller.SetChannelDegradationExclusion)
 }
 
 func TestChannelDeleteRoutesUseSensitiveWritePermission(t *testing.T) {
@@ -74,7 +76,7 @@ func TestProviderRoutesEnforcePermissionsAndCRUD(t *testing.T) {
 		common.SetMainDatabaseType(previousType)
 		require.NoError(t, sqlDB.Close())
 	})
-	require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.User{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuditLog{}))
+	require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.Ability{}, &model.User{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuditLog{}))
 	require.NoError(t, authz.Init(db))
 	for i, role := range []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser} {
 		token := fmt.Sprintf("provider-route-test-%d", i)
@@ -85,6 +87,7 @@ func TestProviderRoutesEnforcePermissionsAndCRUD(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	registerProviderRoutes(engine.Group("/api"))
+	registerChannelRoutes(engine.Group("/api"))
 
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/providers/"},
@@ -113,7 +116,7 @@ func TestProviderRoutesEnforcePermissionsAndCRUD(t *testing.T) {
 	providerID := 0
 	for _, operation := range []struct{ method, path, body string }{
 		{http.MethodPost, "/api/providers/", `{"name":"reseller","description":"old","id":999,"code":"default","created_time":1,"deleted_at":"2020-01-01"}`},
-		{http.MethodPut, "/api/providers/%d", `{"name":"updated","description":""}`},
+		{http.MethodPut, "/api/providers/%d", `{"name":"updated","description":"","skip_degradation_check":true}`},
 		{http.MethodGet, "/api/providers/?keyword=updated", ""},
 		{http.MethodDelete, "/api/providers/%d", ""},
 	} {
@@ -133,9 +136,10 @@ func TestProviderRoutesEnforcePermissionsAndCRUD(t *testing.T) {
 		var response struct {
 			Success bool `json:"success"`
 			Data    struct {
-				ID          int              `json:"id"`
-				CreatedTime int64            `json:"created_time"`
-				Items       []model.Provider `json:"items"`
+				ID                   int              `json:"id"`
+				SkipDegradationCheck bool             `json:"skip_degradation_check"`
+				CreatedTime          int64            `json:"created_time"`
+				Items                []model.Provider `json:"items"`
 			} `json:"data"`
 		}
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
@@ -145,17 +149,63 @@ func TestProviderRoutesEnforcePermissionsAndCRUD(t *testing.T) {
 			assert.Positive(t, providerID)
 			assert.NotEqual(t, 999, providerID)
 			assert.Greater(t, response.Data.CreatedTime, int64(1))
+			assert.False(t, response.Data.SkipDegradationCheck, "new providers must be eligible by default")
 		}
 		if operation.method == http.MethodGet {
 			require.Len(t, response.Data.Items, 1)
 			assert.Equal(t, providerID, response.Data.Items[0].ID)
 			assert.Empty(t, response.Data.Items[0].Description)
+			assert.True(t, response.Data.Items[0].SkipDegradationCheck)
 		}
 		assert.NotContains(t, recorder.Body.String(), token)
 	}
 	var count int64
 	require.NoError(t, db.Model(&model.Provider{}).Count(&count).Error)
 	assert.Zero(t, count, "deleted provider is hidden from normal queries")
+	active := model.Provider{Name: "active"}
+	require.NoError(t, active.Save())
+	channel := model.Channel{Name: "test channel", ProviderID: active.ID, Models: "test-model", Type: 1, Key: "hidden-channel-key"}
+	require.NoError(t, channel.Insert())
+	path := fmt.Sprintf("/api/channel/%d/degradation-exclusion", channel.Id)
+	falseValue, trueValue := false, true
+	for _, tc := range []struct {
+		method, token, body string
+		status              int
+		skip                *bool
+	}{
+		{http.MethodGet, "", "", http.StatusUnauthorized, nil},
+		{http.MethodPut, "provider-route-test-1", `{"skip_degradation_check":true}`, http.StatusForbidden, nil},
+		{http.MethodGet, "provider-route-test-1", "", http.StatusOK, &falseValue},
+		{http.MethodPut, "provider-route-test-2", `{"skip_degradation_check":true}`, http.StatusOK, &trueValue},
+		{http.MethodGet, "provider-route-test-1", "", http.StatusOK, &trueValue},
+		{http.MethodPut, "provider-route-test-2", `{"skip_degradation_check":null}`, http.StatusOK, nil},
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(tc.method, path, strings.NewReader(tc.body))
+		if tc.token != "" {
+			request.Header.Set("Authorization", "Bearer "+tc.token)
+		}
+		engine.ServeHTTP(recorder, request)
+		require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+		assert.NotContains(t, recorder.Body.String(), "hidden-channel-key")
+		if tc.body == `{"skip_degradation_check":null}` {
+			assert.Contains(t, recorder.Body.String(), `"success":false`)
+		}
+		if tc.skip != nil {
+			var payload struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Skip bool `json:"skip_degradation_check"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+			require.True(t, payload.Success)
+			assert.Equal(t, *tc.skip, payload.Data.Skip)
+		}
+	}
+	var saved model.Channel
+	require.NoError(t, db.First(&saved, channel.Id).Error)
+	assert.True(t, saved.SkipDegradationCheck)
 }
 
 func assertChannelRoutePermission(t *testing.T, method string, path string, permission authz.Permission, handler any) {

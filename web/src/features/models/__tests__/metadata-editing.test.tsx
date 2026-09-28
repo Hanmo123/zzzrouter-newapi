@@ -424,6 +424,12 @@ describe('metadata editing', () => {
     expect(vendorInput).toHaveValue('Another vendor')
     await user.clear(description)
     await user.type(description, 'Updated metadata')
+    const checkSwitch = screen.getByRole('switch', {
+      name: 'Enable degradation check for this model',
+    })
+    expect(checkSwitch).not.toBeChecked()
+    await user.click(checkSwitch)
+    expect(checkSwitch).toBeChecked()
     await user.click(
       screen.getByRole('button', { name: /Update Model|Save metadata/ })
     )
@@ -438,6 +444,7 @@ describe('metadata editing', () => {
       model_name: 'example-model',
       vendor_id: 4,
       endpoints: '',
+      degradation_check_enabled: true,
     })
   })
   it('keeps metadata drafts while saving pricing independently and preserves the price draft across tabs', async () => {

@@ -206,6 +206,7 @@ import {
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
+import { ChannelDegradationExclusion } from '../channel-degradation-exclusion'
 import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelProviderFields } from '../channel-provider-fields'
@@ -2574,6 +2575,17 @@ export function ChannelMutateDrawer({
 
         <ChannelProviderFields control={form.control} />
         <ChannelObservationFields control={form.control} />
+        {isEditing && channelId != null && (
+          <ChannelDegradationExclusion
+            channelId={channelId}
+            open={open}
+            canWrite={hasPermission(
+              currentUser,
+              ADMIN_PERMISSION_RESOURCES.CHANNEL,
+              ADMIN_PERMISSION_ACTIONS.WRITE
+            )}
+          />
+        )}
 
         {!isEditing && (
           <FormField

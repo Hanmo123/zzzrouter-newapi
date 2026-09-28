@@ -2,6 +2,13 @@
   "translation": {
     "Public ratio": "公開倍率",
     "Is degraded": "是否降智",
+    "Enable degradation check for this model": "為此模型啟用降智檢測",
+    "Manual and scheduled checks include matching channel models. Scheduled checks also require DEGRADATION_CHECK_ENABLED=true on the server.": "手動和定時檢測會包含渠道中符合的模型。定時檢測還需在服務端設定 DEGRADATION_CHECK_ENABLED=true。",
+    "Do not check degradation for this provider": "不檢測此服務商的降智情況",
+    "Do not check degradation for this channel": "不檢測此渠道的降智情況",
+    "Off by default. When enabled, manual and scheduled checks skip this channel even if its models are enabled.": "預設關閉。啟用後，即使模型允許檢測，手動和定時檢測也會跳過此渠道。",
+    "Cannot load channel degradation settings": "無法載入渠道降智檢測設定",
+    "When enabled, manual and scheduled checks skip all channels of this provider.": "啟用後，手動和定時檢測都會跳過此服務商的全部渠道。",
     "Degraded": "降智",
     "Not degraded": "未降智",
     "Callable (online)": "是否可呼叫（在線）",

@@ -184,7 +184,15 @@ func UpdateModelMeta(c *gin.Context) {
 		}
 	}
 	model.RefreshPricing()
+	var saved model.Model
+	if err := model.DB.First(&saved, m.Id).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	m = saved
 	m.HasMetadata = m.Id > 0
+	enabled := m.DegradationCheckEnabled != nil && *m.DegradationCheckEnabled
+	m.DegradationCheckEnabled = &enabled
 	common.ApiSuccess(c, &m)
 }
 
@@ -257,6 +265,8 @@ func enrichModels(models []*model.Model) error {
 			continue
 		}
 		metadata.HasMetadata = metadata.Id > 0
+		enabled := metadata.DegradationCheckEnabled != nil && *metadata.DegradationCheckEnabled
+		metadata.DegradationCheckEnabled = &enabled
 		channelIDs := make(map[int]struct{})
 		for name, ids := range configured {
 			if metadata.MatchesName(name) {

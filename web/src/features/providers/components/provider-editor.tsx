@@ -25,17 +25,20 @@ import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
+import { sideDrawerSwitchItemClassName } from '@/components/drawer-layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { getServerErrorMessage } from '@/lib/server-error-message'
 
@@ -55,11 +58,15 @@ export function ProviderEditor(props: {
     defaultValues: {
       name: props.provider?.name ?? '',
       description: props.provider?.description ?? '',
+      skip_degradation_check: props.provider?.skip_degradation_check ?? false,
     },
   })
   const save = useMutation({
-    mutationFn: (values: { name: string; description: string }) =>
-      saveProvider(values, props.provider?.id),
+    mutationFn: (values: {
+      name: string
+      description: string
+      skip_degradation_check: boolean
+    }) => saveProvider(values, props.provider?.id),
     meta: { errorToast: false },
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: providersQueryKey })
@@ -134,6 +141,31 @@ export function ProviderEditor(props: {
                     />
                   </FormControl>
                   <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='skip_degradation_check'
+              render={({ field }) => (
+                <FormItem className={sideDrawerSwitchItemClassName()}>
+                  <div className='flex flex-col gap-0.5'>
+                    <FormLabel>
+                      {t('Do not check degradation for this provider')}
+                    </FormLabel>
+                    <FormDescription>
+                      {t(
+                        'When enabled, manual and scheduled checks skip all channels of this provider.'
+                      )}
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={save.isPending}
+                    />
+                  </FormControl>
                 </FormItem>
               )}
             />

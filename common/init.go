@@ -27,6 +27,8 @@ func printHelp() {
 	fmt.Println("Original Project: OneAPI by JustSong - https://github.com/songquanpeng/one-api")
 	fmt.Println("Maintainer: QuantumNous - https://github.com/QuantumNous/new-api")
 	fmt.Println("Usage: newapi [--port <port>] [--log-dir <log directory>] [--version] [--help]")
+	fmt.Println("       newapi degradation-check [--provider-id <IDs>] [--channel-id <IDs>] [--model <names>] [--help]")
+	fmt.Println("       newapi degradation-probe --endpoint <URL> --model <MODEL> [--help]")
 }
 
 func InitEnv() {

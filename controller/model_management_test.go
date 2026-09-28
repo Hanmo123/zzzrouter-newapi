@@ -490,6 +490,43 @@ export function parseTaskResult() { return {}; }
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
 
+			t.Run("degradation_check_setting_is_independent_of_metadata_status", func(t *testing.T) {
+				item := model.Model{ModelName: "check-policy-model", Status: 1}
+				require.NoError(t, item.Insert())
+				t.Cleanup(func() { require.NoError(t, db.Unscoped().Delete(&item).Error) })
+				var response struct {
+					Success bool        `json:"success"`
+					Data    model.Model `json:"data"`
+				}
+				var listed struct {
+					Success bool `json:"success"`
+					Data    struct {
+						Items []model.Model `json:"items"`
+					} `json:"data"`
+				}
+				modelManagementRequest(t, SearchModelsMeta, "GET", "/api/models/search?keyword=check-policy-model", nil, &listed)
+				require.True(t, listed.Success)
+				require.Len(t, listed.Data.Items, 1)
+				require.NotNil(t, listed.Data.Items[0].DegradationCheckEnabled)
+				assert.False(t, *listed.Data.Items[0].DegradationCheckEnabled, "existing metadata starts with checks off")
+				modelManagementRequest(t, UpdateModelMeta, "PUT", "/api/models/", map[string]any{"id": item.Id, "model_name": item.ModelName, "status": 1, "degradation_check_enabled": true}, &response)
+				require.True(t, response.Success)
+				require.NotNil(t, response.Data.DegradationCheckEnabled)
+				assert.True(t, *response.Data.DegradationCheckEnabled)
+				modelManagementRequest(t, UpdateModelMeta, "PUT", "/api/models/", map[string]any{"id": item.Id, "model_name": item.ModelName, "status": 1}, &response)
+				require.True(t, response.Success)
+				require.NotNil(t, response.Data.DegradationCheckEnabled)
+				assert.True(t, *response.Data.DegradationCheckEnabled, "legacy edits must preserve explicit enablement")
+				modelManagementRequest(t, UpdateModelMeta, "PUT", "/api/models/?status_only=true", map[string]any{"id": item.Id, "status": 0}, &response)
+				require.True(t, response.Success)
+				require.NotNil(t, response.Data.DegradationCheckEnabled)
+				assert.True(t, *response.Data.DegradationCheckEnabled)
+				modelManagementRequest(t, UpdateModelMeta, "PUT", "/api/models/", map[string]any{"id": item.Id, "model_name": item.ModelName, "status": 0, "degradation_check_enabled": false}, &response)
+				require.True(t, response.Success)
+				require.NotNil(t, response.Data.DegradationCheckEnabled)
+				assert.False(t, *response.Data.DegradationCheckEnabled)
+			})
+
 			t.Run("square_states_follow_catalog_policy", func(t *testing.T) {
 				records := []model.Model{
 					{ModelName: "square-visible", Status: 1},
@@ -572,6 +609,8 @@ export function parseTaskResult() { return {}; }
 					}
 				}
 				assert.Zero(t, byName["square-bare"].Id)
+				require.NotNil(t, byName["square-bare"].DegradationCheckEnabled)
+				assert.False(t, *byName["square-bare"].DegradationCheckEnabled, "missing metadata starts with checks off")
 				assert.Zero(t, byName["square-hidden-child"].Id)
 				t.Run("filter_square_state_before_pagination", func(t *testing.T) {
 					type filteredResponse struct {

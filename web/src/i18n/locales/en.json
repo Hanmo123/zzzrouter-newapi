@@ -2,6 +2,13 @@
   "translation": {
     "Public ratio": "Public ratio",
     "Is degraded": "Is degraded",
+    "Enable degradation check for this model": "Enable degradation check for this model",
+    "Manual and scheduled checks include matching channel models. Scheduled checks also require DEGRADATION_CHECK_ENABLED=true on the server.": "Manual and scheduled checks include matching channel models. Scheduled checks also require DEGRADATION_CHECK_ENABLED=true on the server.",
+    "Do not check degradation for this provider": "Do not check degradation for this provider",
+    "Do not check degradation for this channel": "Do not check degradation for this channel",
+    "Off by default. When enabled, manual and scheduled checks skip this channel even if its models are enabled.": "Off by default. When enabled, manual and scheduled checks skip this channel even if its models are enabled.",
+    "Cannot load channel degradation settings": "Cannot load channel degradation settings",
+    "When enabled, manual and scheduled checks skip all channels of this provider.": "When enabled, manual and scheduled checks skip all channels of this provider.",
     "Degraded": "Degraded",
     "Not degraded": "Not degraded",
     "Callable (online)": "Callable (online)",

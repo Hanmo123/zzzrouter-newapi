@@ -109,6 +109,26 @@ export type CodexCredentialRefreshResponse = {
   }
 }
 
+export async function getChannelDegradationExclusion(
+  id: number
+): Promise<boolean> {
+  const response = await api.get<{
+    success: boolean
+    data: { skip_degradation_check: boolean }
+  }>(`/api/channel/${id}/degradation-exclusion`)
+  return requireServerSuccess(response.data).data.skip_degradation_check
+}
+
+export async function setChannelDegradationExclusion(
+  id: number,
+  skip: boolean
+): Promise<void> {
+  const response = await api.put(`/api/channel/${id}/degradation-exclusion`, {
+    skip_degradation_check: skip,
+  })
+  requireServerSuccess(response.data)
+}
+
 // ============================================================================
 // Base Channel CRUD Operations
 // ============================================================================

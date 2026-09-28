@@ -177,6 +177,7 @@ describe('provider console', () => {
       expect(post).toHaveBeenCalledWith('/api/providers/', {
         name: 'Example upstream',
         description: 'Standard channels',
+        skip_degradation_check: false,
       })
     )
     await waitFor(() =>
@@ -191,11 +192,17 @@ describe('provider console', () => {
       'Updated upstream'
     )
     await user.clear(screen.getByLabelText('Description'))
+    await user.click(
+      screen.getByRole('switch', {
+        name: 'Do not check degradation for this provider',
+      })
+    )
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(put).toHaveBeenCalledWith('/api/providers/2', {
         name: 'Updated upstream',
         description: '',
+        skip_degradation_check: true,
       })
     )
     expect(await screen.findByText('Updated upstream')).toBeVisible()

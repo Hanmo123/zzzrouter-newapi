@@ -51,6 +51,17 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "plugin" {
 		os.Exit(jsplugin.RunCLI(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && (os.Args[1] == "degradation-check" || os.Args[1] == "degradation-probe") {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		var code int
+		if os.Args[1] == "degradation-probe" {
+			code = service.RunDegradationProbeCLI(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		} else {
+			code = service.RunDegradationCLI(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		}
+		stop()
+		os.Exit(code)
+	}
 	startTime := time.Now()
 	kitutil.SetLogging(common.SysLog, func(message string) {
 		logger.LogError(nil, message)
@@ -156,6 +167,7 @@ func main() {
 	// schedules and executes them. Master-only execution and the UpdateTask
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
+	service.RegisterChannelDegradationTask()
 	service.StartSystemTaskRunner()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {

@@ -23,6 +23,7 @@ export interface Provider {
   name: string
   description: string
   channel_count: number
+  skip_degradation_check?: boolean
   created_time: number
   updated_time: number
 }
@@ -34,6 +35,7 @@ export interface ProviderListParams {
 }
 
 export const providerFormSchema = z.object({
+  skip_degradation_check: z.boolean().default(false),
   name: z
     .string()
     .trim()
