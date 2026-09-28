@@ -31,6 +31,159 @@ import (
 	"gorm.io/gorm"
 )
 
+// Upstream fixtures honor stream:true without invoking production parsing.
+func writeDegradationTestStream(w http.ResponseWriter, body, format string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	write := func(value any) {
+		encoded, _ := common.Marshal(value)
+		_, _ = io.WriteString(w, "data: "+string(encoded)+"\n\n")
+	}
+	if format == "chat" {
+		_, _ = io.WriteString(w, "data: "+strings.ReplaceAll(body, `"message":`, `"delta":`)+"\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+		return
+	}
+	var snapshot struct {
+		Output []struct {
+			Type    string           `json:"type"`
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"output"`
+		Content []map[string]any `json:"content"`
+	}
+	if common.UnmarshalJsonStr(body, &snapshot) != nil {
+		_, _ = io.WriteString(w, "data: invalid\n\n")
+		return
+	}
+	if format == "responses" {
+		for _, output := range snapshot.Output {
+			for _, part := range output.Content {
+				kind := "response.reasoning_text.delta"
+				if output.Type == "message" && (output.Role == "" || output.Role == "assistant") {
+					kind = "response.output_text.delta"
+				}
+				write(map[string]any{"type": kind, "delta": part["text"]})
+			}
+		}
+		write(map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed"}})
+	} else {
+		for _, part := range snapshot.Content {
+			kind := "thinking_delta"
+			if part["type"] == "text" {
+				kind = "text_delta"
+			}
+			write(map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": kind, "text": part["text"]}})
+		}
+		write(map[string]any{"type": "message_stop"})
+	}
+}
+
+type degradationReaderFunc func([]byte) (int, error)
+
+func (read degradationReaderFunc) Read(buffer []byte) (int, error) { return read(buffer) }
+
+func TestDegradationStreamingTTFT(t *testing.T) {
+	for _, scenario := range []struct {
+		format string
+		chunks []string
+	}{
+		{"chat", []string{
+			": keepalive\r\n\r\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"starting number\"}}]}\r\n\r\n",
+			"data: {\"choices\":[{\"delta\":{\"content\":\"I can\"}}]}\n\n",
+			"data: {\"choices\":[{\"delta\":{\"content\":\"'t\"}}]}\n\n",
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+		}},
+		{"responses", []string{
+			"event: response.reasoning_text.delta\ndata: {\"delta\":\"starting number\"}\n\n",
+			"event: response.output_text.delta\ndata: {\"delta\":\"I can\"}\n\n",
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"'t\"}\n\n",
+			"event: response.completed\ndata: {\"response\":{\"status\":\"completed\"}}\n\n",
+		}},
+		{"anthropic", []string{
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"starting number\"}}\n\n",
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"I can\"}}\n\n",
+			"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"'t\"}}\n\n",
+			"data: {\"type\":\"message_stop\"}\n\n",
+		}},
+	} {
+		t.Run(scenario.format, func(t *testing.T) {
+			var clock time.Duration
+			index := 0
+			reader := degradationReaderFunc(func(buffer []byte) (int, error) {
+				if index == len(scenario.chunks) {
+					return 0, io.EOF
+				}
+				clock = []time.Duration{10, 60, 80, 200}[index] * time.Millisecond
+				n := copy(buffer, scenario.chunks[index])
+				scenario.chunks[index] = scenario.chunks[index][n:]
+				if scenario.chunks[index] == "" {
+					index++
+				}
+				return n, nil
+			})
+			text, ttft, code := readDegradationStream(context.Background(), reader, scenario.format, func() time.Duration { return clock })
+			require.Empty(t, code)
+			assert.Equal(t, "I can't", text)
+			require.NotNil(t, ttft)
+			assert.EqualValues(t, 60, *ttft, "headers, keepalives and reasoning must not start TTFT")
+			assert.Equal(t, 200*time.Millisecond, clock, "completion must not replace TTFT")
+		})
+	}
+	for _, scenario := range []struct {
+		name, format, body, text, code string
+		measured                       bool
+	}{
+		{"truncated chat", "chat", "data: {\"choices\":[{\"delta\":{\"content\":\"can't\"}}]}\n\n", "", "invalid_response", true},
+		{"stream error after text", "chat", "data: {\"choices\":[{\"delta\":{\"content\":\"can't\"}}]}\n\ndata: {\"error\":{\"message\":\"secret-canary\"}}\n\n", "", "stream_error", true},
+		{"only role", "chat", "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: [DONE]\n\n", "", "invalid_response", false},
+		{"empty answer", "chat", "data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\ndata: [DONE]\n\n", "", "", false},
+		{"multiline refusal", "chat", "data: {\"choices\":[\n" + "data: {\"delta\":{\"refusal\":\"can't\"}}]}\n\ndata: [DONE]\n\n", "can't", "", true},
+		{"Responses refusal", "responses", "data: {\"type\":\"response.refusal.delta\",\"delta\":\"can't\"}\n\ndata: {\"type\":\"response.completed\"}\n\n", "can't", "", true},
+		{"Responses incomplete", "responses", "data: {\"type\":\"response.incomplete\"}\n\n", "", "stream_error", false},
+		{"Anthropic error", "anthropic", "event: error\ndata: {\"error\":{\"message\":\"secret-canary\"}}\n\n", "", "stream_error", false},
+		{"completion-only has no TTFT", "responses", "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"can't\"}]}]}}\n\n", "can't\n", "", false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			text, ttft, code := readDegradationStream(context.Background(), strings.NewReader(scenario.body), scenario.format, func() time.Duration { return 0 })
+			assert.Equal(t, scenario.text, text)
+			assert.Equal(t, scenario.code, code)
+			if scenario.measured {
+				require.NotNil(t, ttft)
+				assert.Zero(t, *ttft, "zero ms is a valid measured value")
+			} else {
+				assert.Nil(t, ttft)
+			}
+		})
+	}
+	t.Run("read failure after first delta remains inconclusive", func(t *testing.T) {
+		chunk := "data: {\"choices\":[{\"delta\":{\"content\":\"can't\"}}]}\n\n"
+		reader := degradationReaderFunc(func(buffer []byte) (int, error) {
+			if chunk == "" {
+				return 0, io.ErrUnexpectedEOF
+			}
+			n := copy(buffer, chunk)
+			chunk = chunk[n:]
+			return n, nil
+		})
+		text, ttft, code := readDegradationStream(context.Background(), reader, "chat", func() time.Duration { return time.Millisecond })
+		assert.Empty(t, text)
+		assert.Equal(t, "read_error", code)
+		require.NotNil(t, ttft)
+		assert.EqualValues(t, 1, *ttft)
+	})
+	t.Run("non-streaming fallback remains inconclusive", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can't"}}]}`)
+		}))
+		defer server.Close()
+		result := ProbeDegradation(context.Background(), DegradationTarget{Endpoint: server.URL, Model: "model", APIKey: "key", AllowHTTP: true})
+		assert.Equal(t, "streaming_not_supported", result.ErrorCode)
+		assert.Nil(t, result.TTFTMs)
+		assert.Nil(t, result.IsDegraded)
+	})
+}
+
 func TestDegradationRule(t *testing.T) {
 	for _, scenario := range []struct {
 		text, marker string
@@ -66,7 +219,7 @@ func TestDegradationProbeProtocolsAndSafety(t *testing.T) {
 		{"empty answer", "chat", "model-a", `{"choices":[{"message":{"content":""}}]}`, "abnormal", "", 200},
 		{"no answer", "chat", "model-a", `{"choices":[]}`, "error", "invalid_response", 200},
 		{"invalid json", "chat", "model-a", `can’t`, "error", "invalid_response", 200},
-		{"business error", "chat", "model-a", `{"error":{"message":"can’t"}}`, "error", "invalid_response", 200},
+		{"business error", "chat", "model-a", `{"error":{"message":"can’t"}}`, "error", "stream_error", 200},
 		{"http error", "chat", "model-a", `{"choices":[{"message":{"content":"can’t private-response-canary"}}]}`, "error", "http_error", 503},
 		{"too large", "chat", "model-a", strings.Repeat("x", degradationResponseLimit+1), "error", "response_too_large", 200},
 	} {
@@ -81,7 +234,7 @@ func TestDegradationProbeProtocolsAndSafety(t *testing.T) {
 					return
 				}
 				assert.Equal(t, scenario.model, payload["model"])
-				assert.Equal(t, false, payload["stream"])
+				assert.Equal(t, true, payload["stream"])
 				messageKey, limitKey := "messages", "max_tokens"
 				if scenario.format == "responses" {
 					messageKey, limitKey = "input", "max_output_tokens"
@@ -100,9 +253,9 @@ func TestDegradationProbeProtocolsAndSafety(t *testing.T) {
 				} else {
 					assert.Equal(t, "Bearer private-key-canary", r.Header.Get("Authorization"))
 				}
-				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(scenario.status)
-				_, _ = io.WriteString(w, scenario.body)
+				writeDegradationTestStream(w, scenario.body, scenario.format)
 			}))
 			defer server.Close()
 			result := ProbeDegradation(context.Background(), DegradationTarget{Endpoint: server.URL, Model: scenario.model, APIKey: "private-key-canary", Format: scenario.format, AllowHTTP: true})
@@ -166,9 +319,9 @@ func TestDegradationCLI(t *testing.T) {
 	t.Setenv("SQL_DSN", "invalid-database-canary")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/normal" {
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can't private-response-canary"}}]}`)
+			writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can't private-response-canary"}}]}`, "chat")
 		} else {
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"16"}}]}`)
+			writeDegradationTestStream(w, `{"choices":[{"message":{"content":"16"}}]}`, "chat")
 		}
 	}))
 	defer server.Close()
@@ -233,7 +386,7 @@ func TestAdvancedCustomDegradationRoutes(t *testing.T) {
 		var payload map[string]any
 		assert.NoError(t, common.DecodeJson(r.Body, &payload))
 		assert.Equal(t, "target-model", payload["model"])
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can't share secret-response-canary"}}]}`)
+		writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can't share secret-response-canary"}}]}`, "chat")
 	}))
 	defer server.Close()
 	base := server.URL
@@ -299,6 +452,7 @@ func TestDegradationTaskConfiguration(t *testing.T) {
 	config, err := DegradationConfigFromEnv()
 	require.NoError(t, err)
 	assert.False(t, config.Enabled)
+	assert.Equal(t, 8, config.Concurrency)
 	previousMaster := common.IsMasterNode
 	common.IsMasterNode = true
 	t.Cleanup(func() { common.IsMasterNode = previousMaster })
@@ -307,12 +461,14 @@ func TestDegradationTaskConfiguration(t *testing.T) {
 	t.Setenv("DEGRADATION_CHECK_INTERVAL_MINUTES", "15")
 	t.Setenv("DEGRADATION_CHECK_TIMEOUT_SECONDS", "20")
 	t.Setenv("DEGRADATION_CHECK_BATCH_SIZE", "3")
+	t.Setenv("DEGRADATION_CHECK_CONCURRENCY", "4")
 	t.Setenv("DEGRADATION_CHECK_FORMAT", "responses")
 	config, err = DegradationConfigFromEnv()
 	require.NoError(t, err)
 	assert.Equal(t, 15*time.Minute, config.Interval)
 	assert.Equal(t, 20*time.Second, config.Timeout)
 	assert.Equal(t, 3, config.BatchSize)
+	assert.Equal(t, 4, config.Concurrency)
 	assert.Equal(t, "responses", config.Format)
 	assert.True(t, (channelDegradationHandler{}).Enabled())
 	common.IsMasterNode = false
@@ -321,6 +477,8 @@ func TestDegradationTaskConfiguration(t *testing.T) {
 		{"DEGRADATION_CHECK_INTERVAL_MINUTES", "0"},
 		{"DEGRADATION_CHECK_TIMEOUT_SECONDS", "301"},
 		{"DEGRADATION_CHECK_BATCH_SIZE", "1001"},
+		{"DEGRADATION_CHECK_CONCURRENCY", "0"},
+		{"DEGRADATION_CHECK_CONCURRENCY", "65"},
 	} {
 		t.Run(bounds.name+" bounds", func(t *testing.T) {
 			t.Setenv(bounds.name, bounds.value)
@@ -328,12 +486,154 @@ func TestDegradationTaskConfiguration(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-	for _, name := range []string{"DEGRADATION_CHECK_ENABLED", "DEGRADATION_CHECK_INTERVAL_MINUTES", "DEGRADATION_CHECK_TIMEOUT_SECONDS", "DEGRADATION_CHECK_BATCH_SIZE", "DEGRADATION_CHECK_FORMAT", "DEGRADATION_CHECK_ALLOW_HTTP"} {
+	for _, name := range []string{"DEGRADATION_CHECK_ENABLED", "DEGRADATION_CHECK_INTERVAL_MINUTES", "DEGRADATION_CHECK_TIMEOUT_SECONDS", "DEGRADATION_CHECK_BATCH_SIZE", "DEGRADATION_CHECK_FORMAT", "DEGRADATION_CHECK_ALLOW_HTTP", "DEGRADATION_CHECK_CONCURRENCY"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "invalid-canary")
 			_, err := DegradationConfigFromEnv()
 			require.Error(t, err)
 			assert.NotContains(t, err.Error(), "invalid-canary")
+		})
+	}
+}
+
+func TestDegradationConcurrentExecution(t *testing.T) {
+	for _, scenario := range []struct {
+		name, env              string
+		scheduled, cancel      bool
+		override, limit, total int
+	}{
+		{name: "CLI default", limit: 8, total: 10},
+		{name: "CLI configured with timer disabled", env: "4", limit: 4, total: 10},
+		{name: "scheduled configured", env: "3", scheduled: true, limit: 3, total: 5},
+		{name: "CLI flag overrides environment", env: "3", override: 2, limit: 2, total: 10},
+		{name: "CLI cancellation", cancel: true, limit: 8},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "concurrent.db")), &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousDB, previousType, previousMaster := model.DB, common.MainDatabaseType(), common.IsMasterNode
+			model.DB, common.IsMasterNode = db, true
+			common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+			t.Cleanup(func() {
+				model.DB, common.IsMasterNode = previousDB, previousMaster
+				common.SetMainDatabaseType(previousType)
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Model{}, &model.Channel{}, &model.ChannelDegradationSample{}, &model.SystemTask{}, &model.SystemTaskLock{}))
+			t.Setenv("DEGRADATION_CHECK_ENABLED", strconv.FormatBool(scenario.scheduled))
+			t.Setenv("DEGRADATION_CHECK_ALLOW_HTTP", "true")
+			t.Setenv("DEGRADATION_CHECK_CONCURRENCY", scenario.env)
+			if scenario.env == "" {
+				require.NoError(t, os.Unsetenv("DEGRADATION_CHECK_CONCURRENCY"))
+			}
+			gate, started := make(chan struct{}), make(chan struct{}, 16)
+			var active, peak atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				current := active.Add(1)
+				defer active.Add(-1)
+				for {
+					old := peak.Load()
+					if current <= old || peak.CompareAndSwap(old, current) {
+						break
+					}
+				}
+				started <- struct{}{}
+				select {
+				case <-gate:
+					writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can't"}}]}`, "chat")
+				case <-r.Context().Done():
+				}
+			}))
+			defer server.Close()
+			provider := model.Provider{Name: "concurrent"}
+			require.NoError(t, provider.Save())
+			enabled := true
+			for _, name := range []string{"m-a", "m-b"} {
+				require.NoError(t, db.Create(&model.Model{ModelName: name, DegradationCheckEnabled: &enabled}).Error)
+			}
+			base := server.URL
+			for range 5 {
+				require.NoError(t, db.Create(&model.Channel{Type: constant.ChannelTypeOpenAI, ProviderID: provider.ID, Key: "key", Models: "m-a,m-b", BaseURL: &base}).Error)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var task *model.SystemTask
+			if scenario.scheduled {
+				task, err = model.CreateSystemTask(model.SystemTaskTypeChannelDegradation, degradationTaskPayload{}, nil)
+				require.NoError(t, err)
+				var claimed bool
+				task, claimed, err = model.ClaimSystemTask(task.ID, task.Type, "runner", common.GetTimestamp()+60)
+				require.NoError(t, err)
+				require.True(t, claimed)
+			}
+			done := make(chan struct{})
+			var output, stderr bytes.Buffer
+			exit := 0
+			go func() {
+				defer close(done)
+				if scenario.scheduled {
+					(channelDegradationHandler{}).Run(ctx, task, "runner")
+				} else {
+					args := []string{"--allow-http"}
+					if scenario.override > 0 {
+						args = append(args, "--concurrency", strconv.Itoa(scenario.override))
+					}
+					exit = RunDegradationCLI(ctx, args, &output, &stderr)
+				}
+			}()
+			defer func() { cancel(); <-done }()
+			// A gate, not elapsed-time comparisons, proves that exactly the configured
+			// number of requests can be in flight before any response is released.
+			for range scenario.limit {
+				select {
+				case <-started:
+				case <-done:
+					t.Fatal("scan ended before filling worker pool")
+				case <-ctx.Done():
+					t.Fatal("worker pool did not dispatch concurrently")
+				}
+			}
+			if scenario.cancel {
+				cancel()
+			} else {
+				close(gate)
+			}
+			<-done
+			assert.EqualValues(t, scenario.limit, peak.Load())
+			if scenario.cancel {
+				assert.Equal(t, 2, exit)
+			} else if !scenario.scheduled {
+				assert.Zero(t, exit, stderr.String())
+			}
+			if scenario.scheduled {
+				finished, err := model.GetSystemTaskByTaskID(task.TaskID)
+				require.NoError(t, err)
+				assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+			}
+			var samples, latencies int64
+			require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Count(&samples).Error)
+			assert.EqualValues(t, scenario.total, samples)
+			require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Where("ttft_ms IS NOT NULL").Count(&latencies).Error)
+			assert.Equal(t, samples, latencies)
+			if !scenario.cancel {
+				require.NoError(t, db.Model(&model.Channel{}).Where("ttft_ms IS NOT NULL").Count(&latencies).Error)
+				assert.EqualValues(t, 5, latencies)
+				if !scenario.scheduled {
+					previous := 0
+					for line := range strings.SplitSeq(strings.TrimSpace(output.String()), "\n") {
+						var event degradationScanEvent
+						require.NoError(t, common.UnmarshalJsonStr(line, &event))
+						if event.Kind == "result" {
+							assert.GreaterOrEqual(t, event.ChannelID, previous)
+							previous = event.ChannelID
+						}
+					}
+				}
+			}
 		})
 	}
 }
@@ -372,7 +672,7 @@ func TestDegradationSchedulerOptInAndRoundRobin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		assert.Equal(t, "Bearer allowed-key", r.Header.Get("Authorization"))
-		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"original number"}}]}`)
+		writeDegradationTestStream(w, `{"choices":[{"message":{"content":"original number"}}]}`, "chat")
 	}))
 	defer server.Close()
 	provider := model.Provider{Name: "provider"}
@@ -458,12 +758,12 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 		assert.Equal(t, []any{map[string]any{"role": "user", "content": DegradationPrompt}}, body["messages"])
 		switch body["model"] {
 		case "up-b":
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"16"}}]}`)
+			writeDegradationTestStream(w, `{"choices":[{"message":{"content":"16"}}]}`, "chat")
 		case "up-c":
 			w.WriteHeader(503)
 			_, _ = io.WriteString(w, `{"error":"scan-response-canary"}`)
 		case "up-a":
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can't scan-response-canary"}}]}`)
+			writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can't scan-response-canary"}}]}`, "chat")
 		default:
 			assert.Fail(t, "unexpected upstream model")
 		}
@@ -521,6 +821,14 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.First(&mixed, channels[0].Id).Error)
 	require.NotNil(t, mixed.IsDegraded)
 	assert.True(t, *mixed.IsDegraded, "last normal model cannot hide the earlier abnormal model")
+	var maximum int64
+	for _, sample := range samples {
+		if sample.ChannelID == mixed.Id && sample.TTFTMs != nil {
+			maximum = max(maximum, *sample.TTFTMs)
+		}
+	}
+	require.NotNil(t, mixed.TTFTMs)
+	assert.Equal(t, maximum, *mixed.TTFTMs)
 	require.NoError(t, db.First(&inconclusive, channels[2].Id).Error)
 	assert.Nil(t, inconclusive.IsDegraded)
 	require.NotNil(t, inconclusive.IsOnline)
@@ -557,7 +865,7 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"--provider-id", "0"}, {"--provider-id", "1,,2"}, {"--channel-id", "-1"}, {"--model", ""}, {"--status", "bad"}, {"--unknown-secret-canary"}} {
+	for _, args := range [][]string{{"--provider-id", "0"}, {"--provider-id", "1,,2"}, {"--channel-id", "-1"}, {"--model", ""}, {"--status", "bad"}, {"--concurrency", "0"}, {"--concurrency", "65"}, {"--unknown-secret-canary"}} {
 		var out, stderr bytes.Buffer
 		before := hits.Load()
 		assert.Equal(t, 2, RunDegradationCLI(context.Background(), args, &out, &stderr))
@@ -694,7 +1002,7 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 			assert.Equal(t, "/custom/text-model", r.URL.Path)
 			assert.Equal(t, "secret-canary", r.Header.Get("X-Api-Key"))
 			assert.Empty(t, r.Header.Get("Authorization"))
-			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can't"}}]}`)
+			writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can't"}}]}`, "chat")
 		}))
 		defer endpoint.Close()
 		address := endpoint.URL
@@ -787,6 +1095,7 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 					provider := model.Provider{Name: "provider"}
 					require.NoError(t, provider.Save())
 					legacy := model.Channel{Name: "legacy", Key: "private-key-canary", Type: constant.ChannelTypeOpenAI, Models: "alias", Group: "default", ProviderID: provider.ID}
+					var legacyHistory *model.ChannelDegradationSample
 					if mode == "upgrade" {
 						require.NoError(t, db.Create(&model.Model{ModelName: "legacy-model"}).Error)
 						require.NoError(t, db.Migrator().DropIndex(&model.Channel{}, "InstanceID"))
@@ -795,6 +1104,10 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 						require.NoError(t, db.Omit("InstanceID", "SkipDegradationCheck").Create(&legacy).Error)
 						require.NoError(t, db.Migrator().DropColumn(&model.Provider{}, "SkipDegradationCheck"))
 						require.NoError(t, db.Migrator().DropColumn(&model.Model{}, "DegradationCheckEnabled"))
+						require.NoError(t, db.AutoMigrate(&model.ChannelDegradationSample{}))
+						require.NoError(t, db.Migrator().DropColumn(&model.ChannelDegradationSample{}, "TTFTMs"))
+						legacyHistory = &model.ChannelDegradationSample{ID: uuid.NewString(), State: "normal", DurationMs: 250, StartedAt: 1, CompletedAt: 251}
+						require.NoError(t, db.Omit("TTFTMs").Create(legacyHistory).Error)
 					} else {
 						require.NoError(t, legacy.Insert())
 					}
@@ -803,6 +1116,11 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 						require.NoError(t, model.InitializeChannelInstances(db))
 					}
 					if mode == "upgrade" {
+						var migrated model.ChannelDegradationSample
+						require.NoError(t, db.First(&migrated, "id = ?", legacyHistory.ID).Error)
+						assert.Equal(t, "normal", migrated.State)
+						assert.EqualValues(t, 250, migrated.DurationMs)
+						assert.Nil(t, migrated.TTFTMs, "legacy total time must not be migrated into TTFT")
 						policy, err := model.LoadDegradationModelPolicy(context.Background())
 						require.NoError(t, err)
 						assert.False(t, policy.Enabled("legacy-model"), "migration must leave existing models unchecked")
@@ -850,15 +1168,15 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 						assert.Equal(t, "upstream-model", request["model"])
 						switch responseMode.Load() {
 						case 1:
-							_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"16"}}]}`)
+							writeDegradationTestStream(w, `{"choices":[{"message":{"content":"16"}}]}`, "chat")
 						case 2:
 							w.WriteHeader(429)
 							_, _ = io.WriteString(w, `{"error":"can't private-response-canary"}`)
 						case 3:
 							assert.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("key", "rotated-private-canary").Error)
-							_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"16"}}]}`)
+							writeDegradationTestStream(w, `{"choices":[{"message":{"content":"16"}}]}`, "chat")
 						default:
-							_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"can’t private-response-canary"}}]}`)
+							writeDegradationTestStream(w, `{"choices":[{"message":{"content":"can’t private-response-canary"}}]}`, "chat")
 						}
 					}))
 					defer server.Close()
@@ -903,6 +1221,12 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 						}
 						var current model.Channel
 						require.NoError(t, db.First(&current, source.Id).Error)
+						if state < 2 {
+							require.NotNil(t, sample.TTFTMs)
+							assert.GreaterOrEqual(t, *sample.TTFTMs, int64(0))
+							assert.LessOrEqual(t, *sample.TTFTMs, sample.DurationMs)
+							ttft = *sample.TTFTMs
+						}
 						assert.Equal(t, &ttft, current.TTFTMs)
 						assert.Equal(t, common.ChannelStatusEnabled, current.Status)
 						assert.Equal(t, 1, current.ChannelInfo.MultiKeyPollingIndex)
@@ -937,6 +1261,35 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 					require.True(t, ok)
 					handler.Run(context.Background(), claimed, "runner")
 					assert.EqualValues(t, 4, calls.Load())
+					for _, check := range []struct {
+						name, state      string
+						sampleTTFT, want int64
+						edit             bool
+					}{
+						{"measured zero", "normal", 0, 0, false},
+						{"failed stream preserves successful latency", "error", 7, 0, false},
+						{"in-flight manual edit wins", "normal", 7, 99, true},
+					} {
+						t.Run(check.name, func(t *testing.T) {
+							var captured model.Channel
+							require.NoError(t, db.First(&captured, source.Id).Error)
+							if check.edit {
+								require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("ttft_ms", check.want).Error)
+							}
+							when := time.Now().UnixMilli()
+							measured := model.ChannelDegradationSample{ID: uuid.NewString(), State: check.state, StartedAt: when, CompletedAt: when, DurationMs: 10, TTFTMs: &check.sampleTTFT}
+							require.NoError(t, model.RecordChannelDegradation(context.Background(), &captured, &measured, ""))
+							assert.Equal(t, !check.edit, measured.SnapshotApplied)
+							var actual model.Channel
+							require.NoError(t, db.First(&actual, source.Id).Error)
+							require.NotNil(t, actual.TTFTMs)
+							assert.Equal(t, check.want, *actual.TTFTMs)
+							invalid := int64(-1)
+							measured.ID = uuid.NewString()
+							measured.TTFTMs = &invalid
+							assert.Error(t, model.RecordChannelDegradation(context.Background(), &actual, &measured, ""))
+						})
+					}
 					// Old observations stay separate when a numeric channel ID is reused.
 					var beforeDelete model.Channel
 					require.NoError(t, db.First(&beforeDelete, source.Id).Error)
@@ -955,12 +1308,16 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 					assert.Nil(t, currentReplacement.IsDegraded)
 					var count int64
 					require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Where("channel_instance_id = ?", instance).Count(&count).Error)
-					assert.EqualValues(t, 5, count)
+					assert.EqualValues(t, 8, count)
 					require.NoError(t, db.Where("type = ?", handler.Type()).Delete(&model.SystemTask{}).Error)
 					require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelDegradationSample{}))
 					require.NoError(t, model.InitializeChannelInstances(db))
 					require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Count(&count).Error)
-					assert.EqualValues(t, 5, count)
+					expectedCount := 8
+					if legacyHistory != nil {
+						expectedCount++
+					}
+					assert.EqualValues(t, expectedCount, count)
 					t.Run("full CLI scan", func(t *testing.T) { testDegradationFullScan(t, db) })
 				})
 			}

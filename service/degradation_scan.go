@@ -87,6 +87,7 @@ func RunDegradationCLI(ctx context.Context, args []string, stdout, stderr io.Wri
 	flags.StringVar(&options.Status, "status", "all", "channel status: all, enabled, disabled")
 	flags.StringVar(&options.Config.Format, "format", "chat", "OpenAI protocol: chat or responses; native Anthropic is automatic")
 	flags.DurationVar(&options.Config.Timeout, "timeout", 30*time.Second, "per-request timeout (1s..300s)")
+	flags.IntVar(&options.Config.Concurrency, "concurrency", defaultDegradationConcurrency, "concurrent probes (1..64); defaults to DEGRADATION_CHECK_CONCURRENCY or 8")
 	flags.BoolVar(&options.Config.AllowHTTP, "allow-http", false, "explicitly allow plaintext HTTP to operator-managed endpoints")
 	flags.BoolVar(&options.DryRun, "dry-run", false, "list selected targets without requests or result/task writes")
 	flags.BoolVar(&help, "help", false, "show usage")
@@ -102,7 +103,13 @@ func RunDegradationCLI(ctx context.Context, args []string, stdout, stderr io.Wri
 		fmt.Fprintln(stdout, "Defaults to all live providers, all channels (including disabled), and every distinct channel model. Uses existing SQL_DSN/SQLITE_PATH and channel credentials. Reads .env. Executes once, independently of the timer switch. JSONL results and a final summary; exit 0 all normal, 1 abnormal, 2 incomplete/error/empty. Unsupported targets are explicitly skipped. Heuristic only; real upstream requests may cost money.")
 		return 0
 	}
-	if !slices.Contains([]string{"all", "enabled", "disabled"}, options.Status) || !slices.Contains([]string{"chat", "responses"}, options.Config.Format) || options.Config.Timeout < time.Second || options.Config.Timeout > 300*time.Second {
+	concurrencyExplicit := false
+	flags.Visit(func(option *flag.Flag) {
+		if option.Name == "concurrency" {
+			concurrencyExplicit = true
+		}
+	})
+	if !slices.Contains([]string{"all", "enabled", "disabled"}, options.Status) || !slices.Contains([]string{"chat", "responses"}, options.Config.Format) || options.Config.Timeout < time.Second || options.Config.Timeout > 300*time.Second || options.Config.Concurrency < 1 || options.Config.Concurrency > 64 {
 		fmt.Fprintln(stderr, "invalid scan configuration; use --help")
 		return 2
 	}
@@ -111,6 +118,16 @@ func RunDegradationCLI(ctx context.Context, args []string, stdout, stderr io.Wri
 			fmt.Fprintln(stderr, "could not load .env")
 			return 2
 		}
+	}
+	if !concurrencyExplicit {
+		value, err := degradationConcurrencyFromEnv()
+		if err != nil {
+			fmt.Fprintln(stderr, err.Error())
+			return 2
+		}
+		options.Config.Concurrency = value
+	}
+	if model.DB == nil {
 		closeDB, err := model.OpenDegradationDatabase()
 		if err != nil {
 			fmt.Fprintln(stderr, "could not open existing primary database; check configuration and run the upgraded service migrations first")
@@ -202,6 +219,33 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 		if len(channels) == 0 {
 			return summary, nil
 		}
+		pageStartedAt := time.Now().UnixMilli()
+		indices := make(map[int]map[string]int)
+		var targets []DegradationTarget
+		if !options.DryRun {
+			for i := range channels {
+				channel := &channels[i]
+				indices[channel.Id] = make(map[string]int)
+				for raw := range strings.SplitSeq(channel.Models, ",") {
+					name := strings.TrimSpace(raw)
+					if name == "" || (len(options.Models) > 0 && !slices.Contains(options.Models, name)) {
+						continue
+					}
+					if _, exists := indices[channel.Id][name]; exists {
+						continue
+					}
+					target, _, skip := channelDegradationTarget(channel, options.Config, name, policy.Enabled)
+					if skip == "" {
+						indices[channel.Id][name] = len(targets)
+						targets = append(targets, target)
+					}
+				}
+			}
+		}
+		observations, err := probeDegradationTargets(ctx, targets, options.Config.Concurrency, nil)
+		if err != nil {
+			return summary, err
+		}
 		for _, channel := range channels {
 			cursor = channel.Id
 			names := make([]string, 0)
@@ -221,7 +265,8 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				names = append(names, "")
 			}
 			normal, abnormal, failed, skipped := 0, 0, 0, 0
-			startedAt, completedAt := time.Now().UnixMilli(), int64(0)
+			startedAt, completedAt := pageStartedAt, int64(0)
+			var ttft *int64
 			for _, name := range names {
 				if ctx.Err() != nil {
 					return summary, ctx.Err()
@@ -242,7 +287,11 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				case options.DryRun:
 					event.State = "selected"
 				default:
-					observation := ProbeDegradation(ctx, target)
+					observation := observations[indices[channel.Id][name]]
+					if observation.State != "error" && observation.TTFTMs != nil && (ttft == nil || *observation.TTFTMs > *ttft) {
+						value := *observation.TTFTMs
+						ttft = &value
+					}
 					if ctx.Err() != nil {
 						return summary, ctx.Err()
 					}
@@ -252,7 +301,7 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 						RuleVersion: observation.RuleVersion, State: observation.State, MatchedMarker: observation.MatchedMarker,
 						Protocol: target.Format, OutputTokenLimit: degradationOutputTokens, TimeoutMs: target.Timeout.Milliseconds(),
 						ErrorCode: observation.ErrorCode, HTTPStatus: observation.HTTPStatus,
-						StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs,
+						StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs, TTFTMs: observation.TTFTMs,
 					}
 					if err := model.RecordChannelDegradation(ctx, &channel, &sample, runnerID, true); err != nil {
 						return summary, err
@@ -287,7 +336,7 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 					value := abnormal > 0
 					degraded = &value
 				}
-				applied, err := model.ApplyDegradationScanSummary(ctx, &channel, taskID, runnerID, startedAt, completedAt, degraded, normal+abnormal > 0)
+				applied, err := model.ApplyDegradationScanSummary(ctx, &channel, taskID, runnerID, startedAt, completedAt, degraded, normal+abnormal > 0, ttft)
 				if err != nil {
 					return summary, err
 				}

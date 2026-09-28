@@ -19,16 +19,17 @@ import (
 )
 
 type DegradationTaskConfig struct {
-	Enabled   bool
-	Interval  time.Duration
-	Timeout   time.Duration
-	BatchSize int
-	AllowHTTP bool
-	Format    string
+	Enabled     bool
+	Interval    time.Duration
+	Timeout     time.Duration
+	BatchSize   int
+	Concurrency int
+	AllowHTTP   bool
+	Format      string
 }
 
 func DegradationConfigFromEnv() (DegradationTaskConfig, error) {
-	config := DegradationTaskConfig{Interval: time.Hour, Timeout: 30 * time.Second, BatchSize: 100, Format: "chat"}
+	config := DegradationTaskConfig{Interval: time.Hour, Timeout: 30 * time.Second, BatchSize: 100, Concurrency: defaultDegradationConcurrency, Format: "chat"}
 	if raw, present := os.LookupEnv("DEGRADATION_CHECK_ENABLED"); present {
 		value, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -39,6 +40,11 @@ func DegradationConfigFromEnv() (DegradationTaskConfig, error) {
 	if !config.Enabled {
 		return config, nil
 	}
+	concurrency, err := degradationConcurrencyFromEnv()
+	if err != nil {
+		return config, err
+	}
+	config.Concurrency = concurrency
 	minutes, seconds := 60, 30
 	for _, option := range []struct {
 		name        string
@@ -176,28 +182,42 @@ func runChannelDegradationBatch(ctx context.Context, taskID, runnerID string, af
 	if progress != nil {
 		progress(0, len(ids))
 	}
-	for _, id := range ids {
+	channels := make([]model.Channel, len(ids))
+	targets := make([]DegradationTarget, 0, len(ids))
+	names, skips := make([]string, len(ids)), make([]string, len(ids))
+	indices := make([]int, len(ids))
+	for i, id := range ids {
+		if err := model.DB.WithContext(ctx).First(&channels[i], id).Error; err != nil {
+			return result, err
+		}
+		target, name, skip := channelDegradationTarget(&channels[i], config, "", policy.Enabled)
+		if channels[i].Status != common.ChannelStatusEnabled {
+			skip = "channel_disabled"
+		} else if channels[i].SkipDegradationCheck {
+			skip = "channel_check_disabled"
+		}
+		names[i], skips[i], indices[i] = name, skip, len(targets)
+		if skip == "" {
+			targets = append(targets, target)
+		}
+	}
+	observations, err := probeDegradationTargets(ctx, targets, config.Concurrency, func() bool { return common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) })
+	if err != nil {
+		return result, err
+	}
+	for i, id := range ids {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
 		if !common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) {
 			return result, errors.New("degradation task disabled")
 		}
-		var channel model.Channel
-		if err := model.DB.WithContext(ctx).First(&channel, id).Error; err != nil {
-			return result, err
-		}
-		target, publicModel, skip := channelDegradationTarget(&channel, config, "", policy.Enabled)
-		if channel.Status != common.ChannelStatusEnabled {
-			skip = "channel_disabled"
-		} else if channel.SkipDegradationCheck {
-			skip = "channel_check_disabled"
-		}
+		channel, publicModel, skip := channels[i], names[i], skips[i]
 		if skip != "" {
 			result.Skipped++
 			result.SkipReasons[skip]++
 		} else {
-			observation := ProbeDegradation(ctx, target)
+			target, observation := targets[indices[i]], observations[indices[i]]
 			if ctx.Err() != nil {
 				return result, ctx.Err()
 			}
@@ -211,7 +231,7 @@ func runChannelDegradationBatch(ctx context.Context, taskID, runnerID string, af
 					RuleVersion: observation.RuleVersion, State: observation.State, MatchedMarker: observation.MatchedMarker,
 					Protocol: target.Format, OutputTokenLimit: degradationOutputTokens, TimeoutMs: target.Timeout.Milliseconds(),
 					ErrorCode: observation.ErrorCode, HTTPStatus: observation.HTTPStatus,
-					StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs,
+					StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs, TTFTMs: observation.TTFTMs,
 				}
 				if err := model.RecordChannelDegradation(ctx, &channel, &sample, runnerID); err != nil {
 					return result, err

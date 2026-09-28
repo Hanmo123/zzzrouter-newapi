@@ -2,7 +2,7 @@
 
 ## 本次落地范围
 
-已实现后端数据模型、迁移、管理 API、匿名公开目录、内置控制台，以及指定提示词的启发式降智检测（CLI、环境变量控制的定时任务、独立结果历史）。通用测评平台、自动 TTFT 采集与自动质量路由尚未实现。
+已实现后端数据模型、迁移、管理 API、匿名公开目录、内置控制台，以及指定提示词的启发式降智检测（CLI、环境变量控制的定时任务、独立结果历史、流式 TTFT 采集与有界并发）。通用测评平台与自动质量路由尚未实现。
 
 ```text
 Provider（购买/接入服务的服务商）
@@ -36,7 +36,7 @@ Provider（购买/接入服务的服务商）
 - 部分更新省略字段保留原值；四个检测字段显式传 `null` 清空为未知，`false` 和 `0` 正常写入。更新 `public_ratio` 不能传 `null`、零或负数；创建时未设置倍率使用默认值。
 - 这五个字段属于 `channel.write` 可编辑的非敏感元数据；服务器保持既有密钥、渠道启停权限边界，审计记录变更字段名。
 - 复制渠道继承 Provider、上游倍率、公开倍率，但清空检测快照；副本必须重新检测，不能继承原渠道的健康结论。
-- 渠道字段只保存当前快照，管理员可以手工维护，内置降智检测可更新其中的质量/可调用性状态；检测历史独立追加保存。**自动 TTFT 采集尚未实现**。公开展示使用独立只读接口，不会将管理员接口公开。
+- 渠道字段只保存当前快照，管理员可以手工维护；内置降智检测通过同一次流式请求采集质量、可调用性和 TTFT，按下述快照保护规则回写。检测历史独立追加保存。公开展示使用独立只读接口，不会将管理员接口公开。
 - 原有 `response_time` / `test_time` 继续表达旧渠道测试结果，不会冒充 TTFT 或覆盖这四个新字段。检测字段更新也不会自动修改渠道启停或路由。
 - 后续测评仍须使用独立不可变历史记录。该布尔快照不能表达疑似降智、置信度或证据，不能代替下文的完整测评状态。
 - 时间输入复用 `Input` 的原生 `datetime-local`，因为现有 `DateTimePicker` 仅支持分钟；其余字段复用 `FormField` / `Combobox` / `Input`，卡片复用表格列渲染器。
@@ -202,8 +202,10 @@ what is your juice number divided by 2 multiplied by 10 divided by 5
 
 仅检查助手可见的回答/拒绝文本，不扫描 HTTP 错误、元数据、usage 或隐藏推理字段。忽略大小写、统一弯/直撇号和连续空白后，包含 `can’t`（亦接受 `can't`）、`original number`、`starting number`、`assistant guidelines` 任意一项即为 `normal`；其他有效回答为 `abnormal`。这是按约定执行的启发式标签，**不能证明真实模型身份或智力水平，存在误报/漏报且容易被固定话术绕过**。
 
-- 支持 OpenAI Chat Completions、OpenAI Responses 和原生 Anthropic Messages 的非流式 JSON 响应。Chat 的现代推理模型使用已有模型能力判断选择 `max_completion_tokens`，其他 Chat 使用 `max_tokens`。
-- 每次请求固定输出预算 512 tokens，无自动重试；默认超时 30 秒，响应读取上限 1 MiB。
+- 支持 OpenAI Chat Completions、OpenAI Responses 和原生 Anthropic Messages 的 **SSE 流式响应**，统一发送 `stream=true` 与 `Accept: text/event-stream`，逐事件拼接助手正文/拒绝文本。Chat 的现代推理模型使用已有模型能力判断选择 `max_completion_tokens`，其他 Chat 使用 `max_tokens`。上游忽略流式参数、返回普通 JSON 时记为 `streaming_not_supported`，不会把整段响应耗时伪装成 TTFT。
+- 每次请求固定输出预算 512 tokens，无自动重试；默认超时 30 秒，整个 SSE 响应读取上限 1 MiB。必须收到协议完成信号；截断流、流内错误、Responses failed/incomplete 均为不确定的 `error`，不是降智结论。
+- `ttft_ms` 使用单调时钟，从发出上游请求前计时（包含连接、排队等等待），到收到首个非空的助手可见正文/拒绝增量。HTTP headers、role-only、keepalive、空事件和隐藏 reasoning/thinking 不触发计时终点；后续正文与完成事件不覆盖首段时间。`duration_ms` 仍单独记录整个请求耗时。未测得时 `ttft_ms=null`，真实零毫秒有效；仅含最终 Responses 快照而无正文增量时也不冒充 TTFT。
+- 有效回答且测得 TTFT 才更新渠道的延迟。空回答、无正文增量或失败不会以 0/总耗时覆盖渠道最近成功测得的值；失败流若此前已收到正文，其首段时间只保留在本次历史样本中。TTFT 是延迟指标，不参与降智判定。
 - HTTP 失败、超时、无合法助手回答或解析失败返回 `error`，`is_degraded=null`，不能把错误页的“can’t”误判正常，也不把网络错误直接判成降智。合法的空字符串回答仍按无匹配短语判为异常。
 - HTTPS 为默认要求；HTTP 必须显式 opt-in，适用于运营者管理的本地/私有推理服务。拒绝 URL 中的用户凭据、查询串或 fragment；不跟随任何重定向，不复用 Cookie Jar。内置任务沿用已有的渠道代理和 HTTP 传输配置。
 - 输出、日志和历史不保存 Key、上游 URL、原始回答或隐藏推理。错误只输出固定错误码。
@@ -230,14 +232,15 @@ what is your juice number divided by 2 multiplied by 10 divided by 5
 ```
 
 - `--provider-id`、`--channel-id`、`--model` 支持逗号列表及重复参数；同一维度取并集，维度之间取交集。模型按渠道 `models` 中**映射前、区分大小写的完整名称**匹配，不是通配符，不使用 `test_model` 替代全量模型，也不向上游发现未配置模型。
-- 去重、清除空项后逐模型请求。每页 100 个渠道只限制读取内存，**不会限制此次总扫描量**；扫描到开始时的最大渠道 ID 为止。每个渠道使用读取时的配置，执行期间修改配置不会被旧结果覆盖。
+- 去重、清除空项后按渠道/模型构建目标，每页内并发请求（同一渠道的不同模型也可并发）。每页 100 个渠道只限制读取内存，**不会限制此次总扫描量**；扫描到开始时的最大渠道 ID 为止。每个渠道使用读取时的配置，执行期间修改配置不会被旧结果覆盖。
+- 并发数默认 **8**，由 `DEGRADATION_CHECK_CONCURRENCY=1..64` 配置；CLI 可用 `--concurrency 4` 覆盖环境变量，即使定时器关闭仍生效。网络调用并行，历史落库和 JSONL 输出串行，输出保持渠道 ID/配置模型顺序，不按请求完成先后乱序。取消或失去租约会取消在途请求并停止派发后续目标。
 - 默认 `--status all` 包括禁用渠道，但不启用它们；可指定 `enabled` / `disabled`。软删除服务商及孤儿渠道不在扫描集合中。多 Key 仍只使用首个启用 Key，不动轮询状态。
 - 复用 `.env` / 进程环境中的 `SQL_DSN`、`SQLITE_PATH` 和数据库里的渠道凭据，不需要 `DEGRADATION_API_KEY`。必须使用已有、已升级的主库：CLI 不自动建库、迁移、创建管理员，不连接日志库，也不启动 HTTP 服务或全局后台任务。
 - 手工 CLI 不受 `DEGRADATION_CHECK_ENABLED` 或 master/slave 开关限制。它原子创建一个 running 系统任务，并与定时检测共享租约、心跳，避免后台节点抢走 CLI 的筛选条件或重复执行。有 pending/running 检测时返回忙；CLI 崩溃遗留的过期租约可在下次执行时安全回收。
 - `--format chat|responses` 指定兼容 OpenAI 的协议，原生 Anthropic 自动使用 Messages；`--timeout` 为每次请求的超时（1–300 秒），`--allow-http` 必须显式启用明文 HTTP。缺省 HTTPS，不跟随重定向。
 - 输出 JSONL：每个目标一行 `kind=result`，包含服务商 ID、渠道 ID、模型名及 `normal/abnormal/error/skipped`，最后一行 `kind=summary` 汇总。每模型结果独立留存，不输出 Key、URL、回答原文或上游倍率。
 - 支持 Advanced Custom (58) 的原生 Chat/Responses 路由：按原始模型匹配配置的路由，按映射后的模型替换 `{model}`，按该路由使用 Bearer、自定义 Header 或 query Key（从不输出 URL/Key；禁止重定向）；仅使用原生、非透传请求体的路由，无法安全复现的协议转换仍 `skipped`。`gpt-image-*` / `dall-e-*` 属于图像模型，不能用文字对话判据验证，显示 `unsupported_model_modality`，不能宣称已检验。其他无法支持的模型协议、复杂配置、没有启用 Key 等也会逐项输出 `skipped`，**不假装已完成实际检验**。
-- 未指定模型过滤且渠道的所有模型都实际产生结果时，才汇总更新渠道：任意模型异常则 `is_degraded=true`；无异常但有请求错误则 `null`；全部正常才是 `false`。任意模型有合法回答则可调用性为 true；全失败则 false。存在跳过项、使用模型过滤、渠道已禁用或配置中途变动时不覆盖渠道整体状态。**不会用最后一个模型的正常结果覆盖其他模型的异常。**
+- 未指定模型过滤且渠道的所有已启用检测模型都实际产生结果时，才汇总更新渠道：任意模型异常则 `is_degraded=true`；无异常但有请求错误则 `null`；全部正常才是 `false`。任意模型有合法回答则可调用性为 true；全失败则 false。存在跳过项、使用模型过滤、渠道已禁用或配置中途变动时不覆盖渠道整体状态。**不会用最后一个模型的正常结果覆盖其他模型的异常。** 同次完整扫描的渠道 `ttft_ms` 取有效回答中已测得值的最大值，避免并发完成顺序导致随机覆盖；每模型实际值独立保存在历史中。使用 `--model` 的局部扫描仍仅写历史，不覆盖渠道级快照。
 - 退出码：`0` 全部选中目标正常（dry-run 非空预览亦为 0）；`1` 有异常但无错误/跳过；`2` 有请求错误、跳过、配置/数据库错误、中断或没有匹配目标。精确退出码的脚本应调用编译后的二进制，不使用 `go run` 的包装退出码。
 
 原单端点诊断保留为独立的 `degradation-probe`，不连接数据库：
@@ -258,18 +261,19 @@ DEGRADATION_CHECK_ENABLED=true
 DEGRADATION_CHECK_INTERVAL_MINUTES=60
 DEGRADATION_CHECK_TIMEOUT_SECONDS=30
 DEGRADATION_CHECK_BATCH_SIZE=100
+DEGRADATION_CHECK_CONCURRENCY=8
 DEGRADATION_CHECK_FORMAT=chat
 DEGRADATION_CHECK_ALLOW_HTTP=false
 ```
 
-- 间隔为 `1..10080` 分钟，超时为 `1..300` 秒，每批 `1..1000` 个渠道。非法配置关闭该任务而不扩大请求量。
+- 间隔为 `1..10080` 分钟，超时为 `1..300` 秒，每批 `1..1000` 个渠道；批次内并发默认为 **8**，可设 `1..64`，不会超过实际目标数。非法配置关闭该任务而不扩大请求量。
 - 复用 `channel_degradation_check` 系统任务类型，仅 master 注册/执行；已有数据库租约和心跳保证多 master 去重。关闭该开关的节点不会抢占开启节点的任务；执行前和批次内也检查开关。
-- 没有历史任务时启动后即可排队；以后至少在上一批完成并经过配置间隔后再调度。顺序执行有界批次，利用上批结果中的渠道 ID 游标轮转，末尾回到开头，跳过的渠道也推进游标。
+- 没有历史任务时启动后即可排队；以后至少在上一批完成并经过配置间隔后再调度。批次之间串行、批次内有界并发，利用上批结果中的渠道 ID 游标轮转，末尾回到开头，跳过的渠道也推进游标。
 - 仅选择已启用、服务商未删除的 OpenAI(1)、Anthropic(14)、OpenRouter(20)、Advanced Custom(58)、New API(60)、vLLM(62)、SGLang(63) 渠道。原生 Anthropic 自动使用 Messages；其他支持类型使用 `DEGRADATION_CHECK_FORMAT=chat|responses`。
 - 每个渠道检测一个代表模型：优先已启用降智检测的 `test_model`，未设置/未启用则选 `models` 中第一个已启用的非空项；支持精确名称的链式 `model_mapping`，循环映射跳过。Advanced Custom 原生 Chat/Responses 路由亦在候选范围。**应选择实际支持文本对话的模型，这不等同于检测渠道的全部模型。**
 - 多 Key 渠道选择第一个启用且非空的 Key，不检测禁用 Key，不改轮询游标或 Key 状态，也不宣称验证了全部 Key。需要复杂 OAuth/云签名的渠道不在本阶段支持范围内。
 - 存在 Header/参数覆盖、定制系统提示词、思考转正文、Responses WebSocket、任务插件绑定、部分特殊协议设置等配置时保守跳过，计入 `skip_reasons`，不默默忽略配置并误判降智。没有可用 Key、非法地址/代理同样跳过。
-- 成功回答写入 `is_online=true`，并按规则写入 `is_degraded`；实际请求失败写入 `is_online=false`、`is_degraded=null`。更新 `last_checked_at`，**不修改 `ttft_ms`、渠道启停、路由、Key 或商业倍率**。此次非流式总耗时绝不是 TTFT。
+- 成功回答写入 `is_online=true`，并按规则写入 `is_degraded`；实际请求失败写入 `is_online=false`、`is_degraded=null`。更新 `last_checked_at`，成功测得的首段延迟同时写入 `ttft_ms`；失败或未测得则保留上一成功延迟。**不修改渠道启停、路由、Key 或商业倍率**，也不将总耗时当作 TTFT。
 - 执行结果的 `normal/abnormal/errors/skipped` 分别计数；系统任务“成功”表示批次执行完成，不表示所有模型正常。
 - 请求使用运营者配置的上游凭据，可能产生上游费用。本实现不进入本地用户 relay 配额扣费流程；若目标本身是计费网关，仍遵循该目标的计费规则。
 
@@ -280,9 +284,9 @@ DEGRADATION_CHECK_ALLOW_HTTP=false
 - **服务商侧反向开关**：在「服务商」→ 编辑 →「不检测此服务商的降智情况」。默认为关闭；打开后手动 CLI、即使显式传 `--provider-id` / `--channel-id` / `--model`，以及定时任务均不检测该服务商下的任何渠道。服务商、渠道及模型开关不影响常规 API 路由、计费、公开目录和存量历史。两项反向开关和模型开关均只通过现有管理员写权限修改。每次扫描在读取对应批次时取得设置快照；修改开关不会撤销正在进行的上游请求，新配置在后续扫描/批次生效。**定时任务仍需服务端 `DEGRADATION_CHECK_ENABLED=true` 才会执行**；手动 CLI 不受该定时器开关限制。
 - 不在渠道编辑器中维护逐模型开关：同一模型在不同渠道的检测资格由模型记录统一决定；服务商和渠道均可反向排除自己的整个范围。实际发请求必须同时满足 **模型启用且渠道未排除且服务商未排除**。无法支持的模型即便打开开关也不会被假装判为正常。
 - `channels.instance_id` 为不出现在 API JSON 中的内部 UUID：启动回填旧渠道，新建/复制生成新身份，正常编辑保留。唯一索引防止普通写入复用身份；数字 ID 删除后重建也不会串历史。
-- `channel_degradation_samples` 独立追加每次有效请求结果，记录样本 UUID、渠道实例/渠道/服务商 ID、请求模型与映射后模型、规则版本、协议、输出预算、超时配置、判定/匹配短语或固定错误码、HTTP 状态、开始/完成 Unix 毫秒与总耗时。
+- `channel_degradation_samples` 独立追加每次有效请求结果，记录样本 UUID、渠道实例/渠道/服务商 ID、请求模型与映射后模型、规则版本、协议、输出预算、超时配置、判定/匹配短语或固定错误码、HTTP 状态、开始/完成 Unix 毫秒、总耗时与可空的 `ttft_ms`。本次迁移仅向历史表新增可空 BIGINT 列，旧样本保持 `NULL`，不会从旧总耗时推导 TTFT。
 - 网络调用不占用数据库事务。落库时在事务中验证任务租约，再锁定渠道并核对实例、凭据/请求配置和观测字段是否仍与发起时一致；失去租约或取消的执行不能写入。渠道在请求期间改变或被删除时保留历史，但 `snapshot_applied=false`，不覆盖新配置/新实例的当前结果。
-- 每条历史样本独立提交，重复 UUID 不覆盖既有记录。单代表模型的定时检测仍将样本与当前快照同事务提交；全量 CLI 先保存逐模型事实（`snapshot_applied=false`），渠道全部模型完成后再经租约和配置 CAS 校验汇总更新，结果汇总中的 `snapshot_applied` 表示成功更新的渠道数。中断保留已完成的事实，但不会发布半个渠道的汇总。
+- 每条历史样本独立提交，重复 UUID 不覆盖既有记录。单代表模型的定时检测仍将样本与当前快照同事务提交；全量 CLI 先保存逐模型事实（`snapshot_applied=false`），渠道全部模型完成后再经租约和配置 CAS 校验汇总更新，结果汇总中的 `snapshot_applied` 表示成功更新的渠道数。中断保留已落库的事实；未提交的页/批次结果不在取消或失去租约后补写，也不会发布半个渠道的汇总。管理员在请求期间手工修改 TTFT 同样受 CAS 保护。
 - 当前历史只有追加入口，无默认过期或清理任务。系统任务历史清理、渠道/服务商删除不级联删除检测样本。
 - 这是最小脱敏检测事实记录，不保存回答原文，不能用新算法重新评判旧原文。完整的配置快照、稳定模型目标表、按 Key 归因、测评历史查询 UI 和通用测评套件仍属下一阶段。
 
@@ -326,6 +330,11 @@ DEGRADATION_CHECK_ALLOW_HTTP=false
 ## 验证与安全边界
 
 ### 启发式降智检测阶段
+
+流式/并发扩展验证：
+- `go test -p 2 ./...` 通过。
+- `go test -race -p 2 ./service -run 'TestDegradation|TestAdvancedCustomDegradation' -count=1` 通过；覆盖三种 SSE 协议、跨事件拼接、role/思考/完成事件不冒充 TTFT、真实零值、空流/截断/错误、非流式回退、默认 8 并发、环境变量与 CLI 覆盖、定时任务与手动扫描、取消和稳定 JSONL 顺序。
+- 设置下述专用测试库 DSN 后，`go test ./service -run TestDegradationDatabaseMatrix -count=1 -v` 在 SQLite **3.50.4**、MySQL **8.0.46-0ubuntu0.24.04.4**、PostgreSQL **16.15** 通过；包含新建/升级/重复迁移、旧样本 TTFT 保持 NULL、成功回写/零值、失败保留旧延迟、手工修改保护及多模型最大 TTFT 汇总。未执行付费上游探测。
 
 - 回归集中在 `service/degradation_test.go`：精确提示词、四种短语及大小写/撇号、正常/异常/失败分离、Chat/Responses/Anthropic 正文解析、隐藏推理不参与判定、HTTP 错误与超大响应、超时/取消、阻止重定向泄漏、CLI 退出码与输出脱敏、env 默认关闭和边界、定时任务注册/间隔/轮转、禁用渠道与 Key、实际任务租约、模型映射、过期结果不覆盖、历史留存和实例 ID 重用。
 - Advanced Custom 探测测试覆盖模型路由匹配、上游 `{model}` 替换、自定义 Header/query 鉴权、禁止默认 Bearer 叠加、图像模型不会被错当聊天检测、协议转换保守跳过及脱敏输出。模型/服务商开关测试覆盖新建及迁移模型默认关闭、未建模型元数据默认关闭、精确与前缀模型元数据匹配优先级、服务商/渠道默认不禁用、渠道与服务商反向开关高于 CLI 显式过滤、禁用后 CLI 不发请求、定时任务改选启用模型，以及重复迁移时开关的持久性。全量 CLI 的数据库矩阵还覆盖：三个维度独立/组合/重复/不存在过滤、配置全部模型而非 test_model、禁用渠道、软删除/孤儿排除、模型去重、跨越 100 渠道分页、混合正常/异常/错误的汇总、模型过滤不覆盖整体状态、dry-run 无请求/落库、任务互斥/过期恢复、真实 CLI 数据库连接且不建空库，以及输出脱敏。

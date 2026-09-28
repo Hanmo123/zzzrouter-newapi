@@ -146,7 +146,7 @@ func BeginDegradationScan(ctx context.Context, runnerID string, payload any, loc
 // ApplyDegradationScanSummary publishes a whole-channel verdict only after all
 // selected models were measured. Partial model filters never call this method.
 // Per-model facts stay append-only; they are not fake channel aggregate samples.
-func ApplyDegradationScanSummary(ctx context.Context, source *Channel, taskID, runnerID string, startedAt, completedAt int64, degraded *bool, online bool) (bool, error) {
+func ApplyDegradationScanSummary(ctx context.Context, source *Channel, taskID, runnerID string, startedAt, completedAt int64, degraded *bool, online bool, ttft *int64) (bool, error) {
 	applied := false
 	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var lease SystemTaskLock
@@ -168,7 +168,11 @@ func ApplyDegradationScanSummary(ctx context.Context, source *Channel, taskID, r
 		if current.Status != common.ChannelStatusEnabled || current.SkipDegradationCheck || !reflect.DeepEqual(channelDegradationInputs(source), channelDegradationInputs(&current)) || (current.LastCheckedAt != nil && *current.LastCheckedAt > startedAt/1000) {
 			return nil
 		}
-		if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(map[string]any{"is_degraded": degraded, "is_online": online, "last_checked_at": completedAt / 1000}).Error; err != nil {
+		updates := map[string]any{"is_degraded": degraded, "is_online": online, "last_checked_at": completedAt / 1000}
+		if ttft != nil && *ttft >= 0 {
+			updates["ttft_ms"] = *ttft
+		}
+		if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(updates).Error; err != nil {
 			return err
 		}
 		applied = true

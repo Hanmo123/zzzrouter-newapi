@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -57,7 +57,8 @@ type DegradationResult struct {
 	HTTPStatus    int    `json:"http_status"`
 	StartedAt     int64  `json:"started_at"` // Unix milliseconds
 	CompletedAt   int64  `json:"completed_at"`
-	DurationMs    int64  `json:"duration_ms"` // non-streaming total time, NOT TTFT
+	DurationMs    int64  `json:"duration_ms"` // total stream duration, NOT TTFT
+	TTFTMs        *int64 `json:"ttft_ms"`     // first assistant output delta; nil if unmeasured
 }
 
 // ClassifyDegradationText implements the requested heuristic, not a general
@@ -98,7 +99,7 @@ func ProbeDegradation(ctx context.Context, target DegradationTarget) (result Deg
 		return
 	}
 	messages := []map[string]string{{"role": "user", "content": DegradationPrompt}}
-	payload := map[string]any{"model": target.Model, "stream": false}
+	payload := map[string]any{"model": target.Model, "stream": true}
 	switch target.Format {
 	case "chat":
 		payload["messages"] = messages
@@ -128,7 +129,7 @@ func ProbeDegradation(ctx context.Context, target DegradationTarget) (result Deg
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
 	if !target.SkipDefaultAuth {
 		if target.Format == "anthropic" {
 			req.Header.Set("x-api-key", target.APIKey)
@@ -158,6 +159,7 @@ func ProbeDegradation(ctx context.Context, target DegradationTarget) (result Deg
 	// Never forward credentials, cookies or the probe body to a redirect target.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	client.Jar = nil
+	sentAt := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -172,18 +174,15 @@ func ProbeDegradation(ctx context.Context, target DegradationTarget) (result Deg
 		result.ErrorCode = "http_error"
 		return
 	}
-	body, err = io.ReadAll(io.LimitReader(resp.Body, degradationResponseLimit+1))
-	if err != nil {
-		result.ErrorCode = degradationIOError(ctx, err, "read_error")
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || mediaType != "text/event-stream" {
+		result.ErrorCode = "streaming_not_supported"
 		return
 	}
-	if len(body) > degradationResponseLimit {
-		result.ErrorCode = "response_too_large"
-		return
-	}
-	text, ok := degradationResponseText(body, target.Format)
-	if !ok {
-		result.ErrorCode = "invalid_response"
+	text, ttft, code := readDegradationStream(ctx, resp.Body, target.Format, func() time.Duration { return time.Since(sentAt) })
+	result.TTFTMs = ttft
+	if code != "" {
+		result.ErrorCode = code
 		return
 	}
 	degraded, marker := ClassifyDegradationText(text)

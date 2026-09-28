@@ -61,6 +61,7 @@ type ChannelDegradationSample struct {
 	StartedAt         int64  `json:"started_at" gorm:"type:bigint;index"` // Unix milliseconds
 	CompletedAt       int64  `json:"completed_at" gorm:"type:bigint"`
 	DurationMs        int64  `json:"duration_ms" gorm:"type:bigint"` // total duration, NOT TTFT
+	TTFTMs            *int64 `json:"ttft_ms" gorm:"type:bigint"`
 	SnapshotApplied   bool   `json:"snapshot_applied"`
 }
 
@@ -87,18 +88,22 @@ func channelDegradationInputs(channel *Channel) []any {
 		channel.Models, channel.ModelMapping, channel.TestModel, channel.OpenAIOrganization,
 		channel.Setting, channel.OtherSettings, channel.ParamOverride, channel.HeaderOverride,
 		channel.ChannelInfo.IsMultiKey, channel.ChannelInfo.MultiKeyStatusList, channel.SkipDegradationCheck,
-		channel.IsOnline, channel.IsDegraded, channel.LastCheckedAt}
+		channel.IsOnline, channel.IsDegraded, channel.LastCheckedAt, channel.TTFTMs}
 }
 
 // RecordChannelDegradation keeps the result even when the channel was deleted,
 // replaced or edited during the network request. Only an unchanged instance
-// receives the latest snapshot. Neither routing state nor TTFT is modified.
+// receives the latest snapshot. Successful streams also publish measured TTFT;
+// errors never replace the last successful latency. Routing state is unchanged.
 func RecordChannelDegradation(ctx context.Context, source *Channel, sample *ChannelDegradationSample, runnerID string, historyOnly ...bool) error {
 	if source.Id <= 0 || source.InstanceID == nil || *source.InstanceID == "" {
 		return errors.New("channel instance is unavailable")
 	}
 	if sample.State != "normal" && sample.State != "abnormal" && sample.State != "error" {
 		return errors.New("invalid degradation state")
+	}
+	if sample.TTFTMs != nil && (*sample.TTFTMs < 0 || *sample.TTFTMs > sample.DurationMs) {
+		return errors.New("invalid degradation TTFT")
 	}
 	if sample.ID == "" || sample.StartedAt <= 0 || sample.CompletedAt < sample.StartedAt {
 		return errors.New("invalid degradation observation")
@@ -131,9 +136,11 @@ func RecordChannelDegradation(ctx context.Context, source *Channel, sample *Chan
 				value := sample.State == "abnormal"
 				degraded = &value
 			}
-			if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(map[string]any{
-				"is_degraded": degraded, "is_online": online, "last_checked_at": sample.CompletedAt / 1000,
-			}).Error; err != nil {
+			updates := map[string]any{"is_degraded": degraded, "is_online": online, "last_checked_at": sample.CompletedAt / 1000}
+			if online && sample.TTFTMs != nil {
+				updates["ttft_ms"] = *sample.TTFTMs
+			}
+			if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(updates).Error; err != nil {
 				return err
 			}
 			sample.SnapshotApplied = true
