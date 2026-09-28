@@ -37,6 +37,7 @@ func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, o
 	if relayInfo == nil {
 		return
 	}
+	AppendRelayChargeInfo(other, relayInfo.RelayCharge, relayInfo.SettledQuota)
 	clamp := relayInfo.QuotaClamp
 	if clamp == nil {
 		return
@@ -44,6 +45,19 @@ func attachQuotaSaturation(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, o
 	attachQuotaSaturationToOther(other, clamp)
 	logger.LogWarn(ctx, fmt.Sprintf("quota saturation on consume log: op=%s kind=%s original=%g clamped=%d user=%d model=%s",
 		clamp.Op, clamp.Kind, clamp.Original, clamp.Clamped, relayInfo.UserId, relayInfo.GetBillingModelName()))
+}
+
+// AppendRelayChargeInfo exposes only customer-facing multipliers and the fee
+// portion of an already-settled charge. It never writes upstream cost.
+func AppendRelayChargeInfo(other *model.LogOther, charge *hosttypes.RelayCharge, quota int) {
+	if charge == nil || other == nil {
+		return
+	}
+	other.SetPublic("base_group_ratio", charge.BaseGroupRatio)
+	other.SetPublic("channel_public_ratio", charge.ChannelPublicRatio)
+	other.SetPublic("service_fee_enabled", charge.ServiceFeeEnabled)
+	other.SetPublic("service_fee_rate", charge.ServiceFeeRate)
+	other.SetPublic("service_fee_quota", charge.ServiceFeeQuota(quota))
 }
 
 func appendRequestPath(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, other *model.LogOther) {

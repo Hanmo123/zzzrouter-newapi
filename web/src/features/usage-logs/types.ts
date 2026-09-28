@@ -115,6 +115,11 @@ export interface ToolSurchargeItem {
 }
 
 export interface LogOtherData {
+  base_group_ratio?: number
+  channel_public_ratio?: number
+  service_fee_enabled?: boolean
+  service_fee_rate?: number
+  service_fee_quota?: number
   admin_info?: {
     request_policy?: PolicyEvent[]
     is_multi_key?: boolean

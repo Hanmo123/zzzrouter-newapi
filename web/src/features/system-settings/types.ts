@@ -271,6 +271,7 @@ export type ModelSettings = {
 }
 
 export type BillingSettings = {
+  RelayServiceFee: string
   QuotaForNewUser: number
   QuotaForInviter: number
   QuotaForInvitee: number

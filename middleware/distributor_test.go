@@ -3,6 +3,8 @@ package middleware
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +21,64 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRoutingModelNormalizationPreservesPayload(t *testing.T) {
+	for _, format := range []string{"json", "form", "multipart"} {
+		t.Run(format, func(t *testing.T) {
+			var body bytes.Buffer
+			contentType := "application/json"
+			switch format {
+			case "json":
+				body.WriteString(`{"model":"base:floor:multiplier<=2","messages":[],"extra":{"kept":true}}`)
+			case "form":
+				contentType = "application/x-www-form-urlencoded"
+				body.WriteString("model=base%3Afloor&prompt=kept")
+			case "multipart":
+				writer := multipart.NewWriter(&body)
+				require.NoError(t, writer.WriteField("model", "base:floor"))
+				require.NoError(t, writer.WriteField("prompt", "kept"))
+				file, err := writer.CreateFormFile("file", "test.wav")
+				require.NoError(t, err)
+				_, err = file.Write([]byte("test-file-bytes"))
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				contentType = writer.FormDataContentType()
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &body)
+			c.Request.Header.Set("Content-Type", contentType)
+			defer common.CleanupBodyStorage(c)
+			request, err := getModelFromRequest(c)
+			require.NoError(t, err)
+			assert.Equal(t, "base", request.Model)
+			storage, err := common.GetBodyStorage(c)
+			require.NoError(t, err)
+			data, err := storage.Bytes()
+			require.NoError(t, err)
+			assert.NotContains(t, string(data), ":floor")
+			assert.Contains(t, string(data), "kept")
+			if format == "multipart" {
+				require.NoError(t, c.Request.ParseMultipartForm(1024))
+				file, _, err := c.Request.FormFile("file")
+				require.NoError(t, err)
+				defer file.Close()
+				data, err := io.ReadAll(file)
+				require.NoError(t, err)
+				assert.Equal(t, "test-file-bytes", string(data))
+				assert.Equal(t, "base", c.Request.FormValue("model"))
+			}
+		})
+	}
+	for _, path := range []string{"/v1/realtime?model=base%3Afloor", "/v1beta/models/base:floor:generateContent"} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		defer common.CleanupBodyStorage(c)
+		request, _, err := getModelRequest(c)
+		require.NoError(t, err)
+		assert.Equal(t, "base", request.Model)
+		assert.NotContains(t, c.Request.URL.String(), ":floor")
+	}
+}
 
 func TestChannelMatchesExpectedTaskPluginUsesGenericChannelSetting(t *testing.T) {
 	channel := &model.Channel{Type: constant.ChannelTypeTaskPlugin}

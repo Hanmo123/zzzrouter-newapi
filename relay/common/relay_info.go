@@ -98,6 +98,9 @@ type RelayInfo struct {
 	IsPlayground           bool
 	UsePrice               bool
 	RelayMode              int
+	RelayCharge            *hosttypes.RelayCharge
+	SettledQuota           int
+	ReservationBeforeGroup float64
 	OriginModelName        string
 	ResponseModel          *ResponseModel
 

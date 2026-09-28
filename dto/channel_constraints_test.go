@@ -7,6 +7,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestModelRoutingSyntax(t *testing.T) {
+	for _, name := range []string{"gpt:floor:multiplier>=0.1:multiplier<2", "ft:gpt:org:id:multiplier=1:floor", "gpt:multiplier<=1", "gpt:multiplier>0.5"} {
+		base, rule, err := ParseModelRouting(name)
+		require.NoError(t, err, name)
+		require.NotNil(t, rule)
+		assert.NotEmpty(t, base)
+	}
+	for _, name := range []string{"gpt", "ft:gpt:org:id", "vendor/model:free"} {
+		base, rule, err := ParseModelRouting(name)
+		require.NoError(t, err)
+		assert.Equal(t, name, base)
+		assert.Nil(t, rule)
+	}
+	for _, name := range []string{":floor", "gpt:floor:floor", "gpt:floor:fastest", "gpt:multiplier=NaN", "gpt:multiplier=Inf", "gpt:multiplier=-1", "gpt:multiplier=0", "gpt:multiplier==1", "gpt:multiplier=", "gpt:multiplier= 1"} {
+		_, _, err := ParseModelRouting(name)
+		assert.Error(t, err, name)
+	}
+	for _, test := range []struct {
+		op   string
+		want bool
+	}{{">=", true}, {"<=", true}, {"=", true}, {">", false}, {"<", false}} {
+		assert.Equal(t, test.want, (MultiplierFilter{Operator: test.op, Value: 1}).Matches(1), test.op)
+	}
+}
+
 func TestResolvedPinPriorityAndMerge(t *testing.T) {
 	t.Run("token pin beats origin pin on a different channel", func(t *testing.T) {
 		constraints := &ChannelConstraints{}

@@ -30,6 +30,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/tidwall/sjson"
 )
 
 const responsesWSEventTypeResponseCreate = "response.create"
@@ -226,7 +227,20 @@ func (s *responsesWSSession) runRequest(state *responsesWSCallState, message []b
 
 func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState, create responsesWSCreateRequest) (apiErr *types.NewAPIError) {
 	policy := service.RequestPolicy(c)
-	modelName := create.Request.Model
+	modelName, routeErr := service.ResolveModelRouting(c, create.Request.Model)
+	if routeErr != nil {
+		return newResponsesWSInvalidRequestError(routeErr)
+	}
+	if modelName != create.Request.Model {
+		body, err := sjson.SetBytes(create.Body, "model", modelName)
+		if err != nil {
+			return newResponsesWSInvalidRequestError(err)
+		}
+		create.Body = body
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		c.Request.ContentLength = int64(len(body))
+	}
+	create.Request.Model = modelName
 	started := time.Now()
 	var info *relaycommon.RelayInfo
 	billingPrepared := false
@@ -582,6 +596,14 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 			return types.NewErrorWithStatusCode(errors.New("the connection channel is no longer allowed for this group and model"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	}
+	if ok, _ := appmodel.ChannelSatisfiesFilters(channel, model, service.GetChannelConstraints(c).Filters); !ok {
+		return types.NewErrorWithStatusCode(errors.New("connection channel does not satisfy routing filters; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	}
+	publicRatio := 1.0
+	if channel.PublicRatio != nil {
+		publicRatio = *channel.PublicRatio
+	}
+	c.Set("channel_public_ratio", publicRatio)
 	for key, value := range s.lockedContext {
 		c.Set(string(key), value)
 	}

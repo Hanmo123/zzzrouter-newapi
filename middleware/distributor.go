@@ -24,6 +24,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type ModelRequest struct {
@@ -248,6 +249,10 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 	if err != nil {
 		return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 	}
+	modelRequest.Model, err = resolveFormRoutingModel(c, modelRequest.Model)
+	if err != nil {
+		return nil, err
+	}
 	return &modelRequest, nil
 }
 
@@ -271,6 +276,28 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
+	}
+	baseModel, err := service.ResolveModelRouting(c, model)
+	if err != nil {
+		return nil, err
+	}
+	if baseModel != model {
+		// Rewrite the reusable payload as well as the DTO so raw passthrough,
+		// channel retries and task endpoint discovery see the base model.
+		body, err := sjson.SetBytes(requestBody, "model", baseModel)
+		if err != nil {
+			return nil, err
+		}
+		replacement, err := common.CreateBodyStorage(body)
+		if err != nil {
+			return nil, err
+		}
+		_ = storage.Close()
+		storage = replacement
+		c.Set(common.KeyBodyStorage, storage)
+		c.Set(common.KeyRequestBody, nil)
+		c.Request.ContentLength = storage.Size()
+		model = baseModel
 	}
 	group, err := getJSONStringValue(values[1], "group")
 	if err != nil {
@@ -469,7 +496,10 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
 			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
+			if err != nil {
+				return nil, false, err
+			}
+			if req.Model != "" {
 				modelRequest.Model = req.Model
 			}
 		}
@@ -481,14 +511,22 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "tts-1")
 		} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/translations") {
 			// 先尝试从请求读取
-			if req, err := getModelFromRequest(c); err == nil && req.Model != "" {
+			req, err := getModelFromRequest(c)
+			if err != nil {
+				return nil, false, err
+			}
+			if req.Model != "" {
 				modelRequest.Model = req.Model
 			}
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "whisper-1")
 			relayMode = relayconstant.RelayModeAudioTranslation
 		} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") {
 			// 先尝试从请求读取
-			if req, err := getModelFromRequest(c); err == nil && req.Model != "" {
+			req, err := getModelFromRequest(c)
+			if err != nil {
+				return nil, false, err
+			}
+			if req.Model != "" {
 				modelRequest.Model = req.Model
 			}
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "whisper-1")
@@ -507,6 +545,24 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
+	base, err := service.ResolveModelRouting(c, modelRequest.Model)
+	if err != nil {
+		return nil, false, err
+	}
+	if base != modelRequest.Model {
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
+			query := c.Request.URL.Query()
+			query.Set("model", base)
+			c.Request.URL.RawQuery = query.Encode()
+		} else {
+			c.Request.URL.Path = strings.Replace(c.Request.URL.Path, modelRequest.Model, base, 1)
+			c.Request.URL.RawPath = ""
+			for i := range c.Params {
+				c.Params[i].Value = strings.Replace(c.Params[i].Value, modelRequest.Model, base, 1)
+			}
+		}
+		modelRequest.Model = base
+	}
 	return &modelRequest, shouldSelectChannel, nil
 }
 
@@ -586,6 +642,11 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		}
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+	publicRatio := 1.0
+	if channel.PublicRatio != nil {
+		publicRatio = *channel.PublicRatio
+	}
+	c.Set("channel_public_ratio", publicRatio)
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelCreateTime, channel.CreatedTime)
@@ -673,7 +734,7 @@ func extractModelNameFromGeminiPath(path string) string {
 	}
 
 	// 查找 ":" 的位置，模型名在 ":" 之前
-	colonIndex := strings.Index(path[startIndex:], ":")
+	colonIndex := strings.LastIndex(path[startIndex:], ":")
 	if colonIndex == -1 {
 		// 如果没有找到 ":"，返回从 "/models/" 到路径结尾的部分
 		return path[startIndex:]

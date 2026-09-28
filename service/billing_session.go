@@ -160,7 +160,9 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	imageRequest := false
 	if s.relayInfo != nil {
 		_, imageRequest = s.relayInfo.Request.(*dto.ImageRequest)
-		imageRequest = imageRequest || s.relayInfo.ImageRequestCount > 0
+		// A channel-price retry can increase the reservation just like an
+		// image quantity override. Recheck funds even after a trust bypass.
+		imageRequest = imageRequest || s.relayInfo.ImageRequestCount > 0 || s.relayInfo.RelayCharge != nil
 	}
 	if s.settled || s.refunded || s.trusted && !imageRequest || targetQuota <= s.preConsumedQuota {
 		return nil

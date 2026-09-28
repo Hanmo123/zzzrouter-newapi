@@ -98,7 +98,9 @@ const i18n = createInstance()
 beforeEach(async () => {
   await i18n.init({
     lng: 'en',
-    resources: { en },
+    // The test switches locale for metadata unit labels, without a network
+    // translation backend. Preload that locale so React does not suspend.
+    resources: { en, 'zh-CN': en },
     interpolation: { escapeValue: false },
   })
   useSystemConfigStore
@@ -311,7 +313,9 @@ test('task log prices use localized unit labels from pricing metadata', async ()
     matched_tier: 'images',
   })
   expect(preview).toHaveTextContent('images · images $0.25/image')
-  await act(() => i18n.changeLanguage('zh-CN'))
+  await act(async () => {
+    await i18n.changeLanguage('zh-CN')
+  })
   expect(
     screen.getByRole('button', { name: /images · images/ })
   ).toHaveTextContent('images · images $0.25/张')

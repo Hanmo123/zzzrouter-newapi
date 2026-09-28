@@ -39,10 +39,14 @@ const (
 	FilterRequestPath        ChannelFilterKind = "request_path"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
+	FilterMultiplier         ChannelFilterKind = "multiplier"
+	FilterAttemptedChannels  ChannelFilterKind = "attempted_channels"
 )
 
 type ChannelFilter struct {
 	Kind                   ChannelFilterKind
+	Multiplier             MultiplierFilter
+	ExcludedChannelIDs     []int
 	RequestPath            string
 	TaskPluginKey          string
 	TaskPluginKeys         []string
@@ -50,6 +54,7 @@ type ChannelFilter struct {
 }
 
 type ChannelConstraints struct {
+	Routing *ModelRouting
 	Pins    []ChannelPin
 	Filters []ChannelFilter
 }

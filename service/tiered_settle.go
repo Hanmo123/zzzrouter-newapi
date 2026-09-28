@@ -175,6 +175,25 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 		)
 	}
 	if snap == nil {
+		if relayInfo == nil || relayInfo.RelayCharge == nil {
+			return nil
+		}
+		quota, err := common.QuotaFromFloatStrict(relayInfo.ReservationBeforeGroup * relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+		if err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		relayInfo.PriceData.QuotaToPreConsume = quota
+		if quota == 0 {
+			return nil
+		}
+		relayInfo.PriceData.FreeModel = false
+		if relayInfo.Billing == nil {
+			return PreConsumeBilling(c, quota, relayInfo)
+		}
+		if err := relayInfo.Billing.Reserve(quota); err != nil {
+			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+		}
+		relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
 		return nil
 	}
 	if snap.GroupRatio == 0 {

@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.": "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.",
+    "Public multiplier applied to customer billing after the group ratio and before the service fee.": "Public multiplier applied to customer billing after the group ratio and before the service fee.",
+    "Relay service fee": "Relay service fee",
+    "Charge relay service fee": "Charge relay service fee",
+    "Service fee (%)": "Service fee (%)",
+    "Service fee": "Service fee",
+    "Channel public multiplier": "Channel public multiplier",
+    "Final charge = model cost × group ratio × selected channel public ratio × (1 + service fee rate).": "Final charge = model cost × group ratio × selected channel public ratio × (1 + service fee rate).",
+    "Changes apply to new requests. In-flight requests and tasks retain their billing snapshot.": "Changes apply to new requests. In-flight requests and tasks retain their billing snapshot.",
     "Public ratio": "Public ratio",
     "Is degraded": "Is degraded",
     "Enable degradation check for this model": "Enable degradation check for this model",

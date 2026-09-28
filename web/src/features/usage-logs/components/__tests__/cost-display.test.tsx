@@ -81,6 +81,19 @@ describe('log cost display', () => {
     }
   )
 
+  test('shows the service fee included in the charged total without hover', () => {
+    renderCost({
+      quota: 10500,
+      other: {
+        service_fee_quota: 500,
+        service_fee_rate: 0.05,
+        service_fee_enabled: true,
+      },
+    })
+    expect(screen.getByText('$0.021')).toBeVisible()
+    expect(screen.getByText('Service fee: $0.001')).toBeVisible()
+  })
+
   test('shows wallet cost and source icon without using subscription metadata', () => {
     renderCost({
       quota: 5000,
@@ -115,7 +128,9 @@ describe('log cost display', () => {
 
     expect(screen.getByText('$0.025')).toBeVisible()
     expect(screen.getByRole('img', { name: 'Subscription' })).toBeVisible()
-    expect(screen.queryByRole('img', { name: 'Wallet' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('img', { name: 'Wallet' })
+    ).not.toBeInTheDocument()
   })
 
   test('keeps legacy cost visible without inventing a funding source', () => {

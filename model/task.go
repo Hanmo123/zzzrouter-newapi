@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/types"
 )
 
 type TaskStatus string
@@ -162,6 +163,7 @@ type TaskPluginAuthorSnapshot struct {
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
+	RelayCharge     *types.RelayCharge           `json:"relay_charge,omitempty"`
 	ModelPrice      float64                      `json:"model_price,omitempty"`       // 模型单价
 	GroupRatio      float64                      `json:"group_ratio,omitempty"`       // 分组倍率
 	ModelRatio      float64                      `json:"model_ratio,omitempty"`       // 模型倍率

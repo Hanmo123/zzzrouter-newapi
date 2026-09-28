@@ -27,6 +27,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -328,6 +329,10 @@ func waitPerfCounters(t *testing.T, wantRequests int64) (requests, successes int
 func newResponsesWSBillingTest(t *testing.T, expression string, handle func(*websocket.Conn, *http.Request), httpEvents ...string) *responsesWSBillingTest {
 	t.Helper()
 	user, token := setupResponsesWSRequestTest(t)
+	previousFee, err := common.Marshal(operation_setting.GetRelayServiceFee())
+	require.NoError(t, err)
+	require.NoError(t, operation_setting.LoadRelayServiceFee(`{"enabled":false,"rate":0.05}`))
+	t.Cleanup(func() { require.NoError(t, operation_setting.LoadRelayServiceFee(string(previousFee))) })
 	previousTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = previousTimeout })

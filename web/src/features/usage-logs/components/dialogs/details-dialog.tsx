@@ -229,11 +229,33 @@ function BillingBreakdown(props: {
 
   const userGR = other.user_group_ratio
   const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
+  const effectiveGR =
+    other.base_group_ratio ?? (isUserGR ? userGR : other.group_ratio)
   if (effectiveGR != null && Number.isFinite(effectiveGR)) {
     rows.push({
       label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
       value: `${formatRatio(effectiveGR)}x`,
+    })
+  }
+
+  if (other.channel_public_ratio != null) {
+    rows.push({
+      label: t('Channel public multiplier'),
+      value: `${formatRatio(other.channel_public_ratio)}x`,
+    })
+  }
+  if (other.service_fee_rate != null) {
+    rows.push({
+      label: t('Service fee (%)'),
+      value: other.service_fee_enabled
+        ? `${formatRatio(other.service_fee_rate * 100)}%`
+        : '0%',
+    })
+  }
+  if (other.service_fee_quota != null) {
+    rows.push({
+      label: t('Service fee'),
+      value: formatLogQuota(other.service_fee_quota),
     })
   }
 

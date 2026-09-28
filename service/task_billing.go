@@ -77,6 +77,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		setTaskImageCount(other, info.PriceData.OtherRatios()["image_count"])
 	}
 	appendTaskLogInfo(task, other)
+	info.SettledQuota = info.PriceData.Quota
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
@@ -148,6 +149,7 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 func taskBillingOther(task *model.Task) *model.LogOther {
 	other := model.NewLogOther()
 	if bc := task.PrivateData.BillingContext; bc != nil {
+		AppendRelayChargeInfo(other, bc.RelayCharge, task.Quota)
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.ModelRatio > 0 {
 			other.SetPublic("model_ratio", bc.ModelRatio)
@@ -358,6 +360,13 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("pre_consumed_quota", preConsumedQuota)
 	other.SetPublic("actual_quota", actualQuota)
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil {
+		feeDelta := bc.RelayCharge.ServiceFeeQuota(actualQuota) - bc.RelayCharge.ServiceFeeQuota(preConsumedQuota)
+		if feeDelta < 0 {
+			feeDelta = -feeDelta
+		}
+		other.SetPublic("service_fee_quota", feeDelta)
+	}
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
@@ -387,6 +396,9 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 
 	// 获取模型价格和倍率
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil {
+		modelRatio, hasRatioSetting = bc.ModelRatio, bc.ModelRatio > 0
+	}
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
 		return false
@@ -412,6 +424,10 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		finalGroupRatio = userGroupRatio
 	} else {
 		finalGroupRatio = groupRatio
+	}
+
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil {
+		finalGroupRatio = bc.GroupRatio
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）

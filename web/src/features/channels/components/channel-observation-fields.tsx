@@ -63,7 +63,7 @@ export function ChannelObservationFields(props: {
             </FormControl>
             <FormDescription>
               {t(
-                'Multiplier for public display only. Does not change upstream costs or customer billing.'
+                'Public multiplier applied to customer billing after the group ratio and before the service fee.'
               )}
             </FormDescription>
             <FormMessage />

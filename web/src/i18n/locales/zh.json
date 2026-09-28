@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.": "私有上游倍率用于 floor 成本排序和 multiplier 筛选，不直接用于用户计费。",
+    "Public multiplier applied to customer billing after the group ratio and before the service fee.": "用户费用在分组倍率基础上乘此公开倍率，再计算服务费。",
+    "Relay service fee": "中转服务费",
+    "Charge relay service fee": "收取中转服务费",
+    "Service fee (%)": "服务费率（%）",
+    "Service fee": "服务费",
+    "Channel public multiplier": "渠道公开倍率",
+    "Final charge = model cost × group ratio × selected channel public ratio × (1 + service fee rate).": "最终费用 = 模型费用 × 分组倍率 × 实际渠道公开倍率 ×（1 + 服务费率）。",
+    "Changes apply to new requests. In-flight requests and tasks retain their billing snapshot.": "修改仅对新请求生效。进行中的请求和任务使用原有计费快照。",
     "Public ratio": "公开倍率",
     "Is degraded": "是否降智",
     "Enable degradation check for this model": "为此模型启用降智检测",

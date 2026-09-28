@@ -134,6 +134,11 @@ export function LogCostDisplay(props: LogCostDisplayProps) {
           ) : null}
           <span className='whitespace-nowrap'>{formatLogQuota(quota)}</span>
         </StatusBadge>
+        {props.other?.service_fee_quota != null ? (
+          <span className='text-muted-foreground text-xs whitespace-nowrap'>
+            {t('Service fee')}: {formatLogQuota(props.other.service_fee_quota)}
+          </span>
+        ) : null}
         {showToolSurcharge ? <ToolSurchargeMarker /> : null}
       </div>
     </TooltipProvider>

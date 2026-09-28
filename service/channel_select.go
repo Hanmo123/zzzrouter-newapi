@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -116,7 +117,22 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
-	filters := GetChannelConstraints(param.Ctx).Filters
+	constraints := GetChannelConstraints(param.Ctx)
+	filters := constraints.Filters
+	selectChannel := model.GetRandomSatisfiedChannel
+	if constraints.Routing != nil && constraints.Routing.Priority == dto.RoutingPriorityFloor {
+		filters = append([]dto.ChannelFilter(nil), filters...)
+		var attempted []int
+		for _, value := range param.Ctx.GetStringSlice("use_channel") {
+			if id, err := strconv.Atoi(value); err == nil {
+				attempted = append(attempted, id)
+			}
+		}
+		filters = append(filters, dto.ChannelFilter{Kind: dto.FilterAttemptedChannels, ExcludedChannelIDs: attempted})
+		selectChannel = func(group, name string, _ int, predicates []dto.ChannelFilter) (*model.Channel, error) {
+			return model.GetFloorChannel(group, name, predicates)
+		}
+	}
 
 	if param.TokenGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
@@ -147,13 +163,19 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
+			channel, err = selectChannel(
 				autoGroup,
 				param.ModelName,
 				priorityRetry,
 				filters,
 			)
+			if err != nil {
+				return nil, autoGroup, err
+			}
 			if channel == nil {
+				if constraints.Routing != nil && constraints.Routing.Priority == dto.RoutingPriorityFloor && !crossGroupRetry && len(param.Ctx.GetStringSlice("use_channel")) > 0 {
+					break
+				}
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
 				logger.LogDebug(param.Ctx, "No available channel in group %s for model %s at priorityRetry %d, trying next group", autoGroup, param.ModelName, priorityRetry)
@@ -190,7 +212,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(
+		channel, err = selectChannel(
 			param.TokenGroup,
 			param.ModelName,
 			param.GetRetry(),
@@ -309,7 +331,7 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 	usingGroup := retry.TokenGroup
 	var channel *model.Channel
 	var selectGroup string
-	if retry.GetRetry() == 0 {
+	if retry.GetRetry() == 0 && (constraints.Routing == nil || constraints.Routing.Priority == "") {
 		if preferredChannelID, found := GetPreferredChannelByAffinity(c, modelName, usingGroup); found {
 			affinityUsable := false
 			preferred, err := model.CacheGetChannel(preferredChannelID)

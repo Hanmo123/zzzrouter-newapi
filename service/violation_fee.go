@@ -117,6 +117,11 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	// Policy penalties are not successful relay usage and retain their own
+	// configured fee; do not add a channel markup or relay service fee.
+	if relayInfo.RelayCharge != nil {
+		groupRatio = relayInfo.RelayCharge.BaseGroupRatio
+	}
 	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
 	if feeQuota <= 0 {
 		return false

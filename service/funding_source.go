@@ -50,7 +50,9 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if !reserved {
 		return ErrInsufficientWalletQuota
 	}
-	w.consumed = amount
+	// Retries can reserve additional channel/image cost on the same wallet.
+	// Keep the complete reservation so rollback and final failure refund it all.
+	w.consumed += amount
 	return nil
 }
 

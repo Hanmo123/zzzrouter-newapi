@@ -126,7 +126,7 @@ export function ChannelProviderFields(props: {
             </FormControl>
             <FormDescription>
               {t(
-                'Channel-level upstream multiplier. Does not change customer billing or routing.'
+                'Private upstream multiplier used for floor routing and multiplier filters, not customer billing.'
               )}
             </FormDescription>
             <FormMessage />
