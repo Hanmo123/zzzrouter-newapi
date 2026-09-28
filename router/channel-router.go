@@ -43,6 +43,7 @@ func registerPublicCatalogRoutes(apiRouter *gin.RouterGroup) {
 	catalog.GET("/providers", controller.ListPublicProviders)
 	catalog.GET("/providers/:id/channels", controller.ListPublicChannels)
 	catalog.GET("/channels", controller.ListPublicChannels)
+	catalog.GET("/models", controller.ListPublicModels)
 }
 
 func registerProviderRoutes(apiRouter *gin.RouterGroup) {

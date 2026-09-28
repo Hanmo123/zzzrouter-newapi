@@ -238,9 +238,85 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				}
 			})
 
+			t.Run("exact model filters paginate on the server and list all visible options", func(t *testing.T) {
+				changes := map[int]string{1: "model-a, model-b", 2: "model-b", 3: "model-c,modela", 4: "model-ab,model a", 5: "m_%, model-a"}
+				for id, names := range changes {
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", id).Update("models", names).Error)
+				}
+				t.Cleanup(func() {
+					for id := range changes {
+						require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", id).Update("models", "model-a,model-b").Error)
+					}
+				})
+				for _, scenario := range []struct {
+					path  string
+					ids   []int
+					total int
+				}{
+					{"/api/public/channels?model=model-a", []int{1, 5}, 2},
+					{"/api/public/channels?model=model-b&page_size=1&p=2", []int{2}, 2},
+					{"/api/public/channels?model=model-c", []int{3}, 1},
+					{"/api/public/channels?model=model-ab", []int{4}, 1},
+					{"/api/public/channels?model=model%20a", []int{4}, 1},
+					{"/api/public/channels?model=modela", []int{3}, 1},
+					{"/api/public/channels?model=Model-a", []int{}, 0},
+					{"/api/public/channels?model=m_%25", []int{5}, 1},
+					{"/api/public/channels?model=m_%25&provider_id=102", []int{}, 0},
+					{"/api/public/providers/101/channels?model=model-b", []int{1, 2}, 2},
+					{"/api/public/channels?model=nonexistent", []int{}, 0},
+				} {
+					recorder, reply := requestPublicCatalog(t, engine, scenario.path)
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					assert.Equal(t, scenario.total, reply.Data.Total)
+					ids := make([]int, 0, len(reply.Data.Items))
+					for _, entry := range reply.Data.Items {
+						ids = append(ids, int(entry["id"].(float64)))
+					}
+					assert.Equal(t, scenario.ids, ids, scenario.path)
+				}
+				recorder, providers := requestPublicCatalog(t, engine, "/api/public/providers?model=model-b")
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Len(t, providers.Data.Items, 1)
+				assert.EqualValues(t, 101, providers.Data.Items[0]["id"])
+				assert.EqualValues(t, 2, providers.Data.Items[0]["channel_count"])
+				for _, scenario := range []struct {
+					path   string
+					models []string
+					total  int
+				}{
+					{"/api/public/models", []string{"m_%", "model a", "model-a", "model-ab", "model-b", "model-c", "modela"}, 7},
+					{"/api/public/models?p=2", []string{}, 7},
+					{"/api/public/models?page_size=2&p=2", []string{"model-a", "model-ab"}, 7},
+					{"/api/public/models?provider_id=102", []string{"model-c", "modela"}, 2},
+					{"/api/public/models?search=MODEL-B", []string{"model-b"}, 1},
+					{"/api/public/models?search=m_%25", []string{"m_%"}, 1},
+					{"/api/public/models?is_online=unknown&is_degraded=unknown", []string{"model-a", "model-b"}, 2},
+				} {
+					recorder := httptest.NewRecorder()
+					engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, scenario.path, nil))
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					for _, secret := range []string{"private-key-canary", "upstream_ratio", "private.example"} {
+						assert.NotContains(t, recorder.Body.String(), secret)
+					}
+					var options struct {
+						Success bool `json:"success"`
+						Data    struct {
+							Total int      `json:"total"`
+							Items []string `json:"items"`
+						} `json:"data"`
+					}
+					require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &options))
+					assert.True(t, options.Success)
+					assert.Equal(t, scenario.total, options.Data.Total)
+					assert.Equal(t, scenario.models, options.Data.Items)
+				}
+			})
+
 			t.Run("invalid and private query inputs are rejected", func(t *testing.T) {
 				for _, path := range []string{
 					"/api/public/channels?sort_by=upstream_ratio", "/api/public/channels?sort_by=key",
+					"/api/public/channels?model=", "/api/public/channels?model=a%2Cb", "/api/public/channels?model=%0A",
+					"/api/public/channels?model=model-a&model=model-b", "/api/public/models?model=model-a", "/api/public/models?sort_by=ttft", "/api/public/models?search=%20", "/api/public/channels?search=model-a", "/api/public/models?search=x&search=y",
 					"/api/public/channels?sort_order=desc%3BDROP", "/api/public/channels?is_online=1",
 					"/api/public/channels?is_degraded=invalid", "/api/public/channels?is_online=",
 					"/api/public/channels?is_online=true&is_online=false", "/api/public/channels?fields=upstream_ratio",

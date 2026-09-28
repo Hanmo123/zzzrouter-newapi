@@ -70,13 +70,14 @@ Provider（购买/接入服务的服务商）
 
 ## 公开目录 API
 
-三个接口均为匿名只读 GET，继承 `/api` 全局限流，并设置 `Cache-Control: no-store`；不复用或放开已有管理员接口。
+四个接口均为匿名只读 GET，继承 `/api` 全局限流，并设置 `Cache-Control: no-store`；不复用或放开已有管理员接口。
 
 | 路径 | 返回内容 |
 | --- | --- |
 | `/api/public/providers` | 当前筛选下有匹配渠道的服务商；仅 `id`、`name`、`channel_count`，按 ID 升序 |
 | `/api/public/providers/:id/channels` | 指定服务商的公开渠道分页列表 |
-| `/api/public/channels` | 全部公开渠道分页列表，可选 `provider_id` |
+| `/api/public/channels` | 全部公开渠道分页列表，可选 `provider_id` 和精确 `model` 筛选 |
+| `/api/public/models` | 当前可见渠道上的去重模型名称（`items: string[]`），可搜索、分页；仅从公开模型名称提取 |
 
 ### 分页、排序和筛选
 
@@ -88,11 +89,14 @@ Provider（购买/接入服务的服务商）
 | `is_degraded` | `false` | `true`、`false`、`all`、`unknown` |
 | `sort_by` | `public_ratio` | 仅渠道列表：`public_ratio`、`ttft`（亦接受 `ttft_ms`） |
 | `sort_order` | `asc` | 仅渠道列表：`asc` / `desc`，大小写不敏感 |
-| `provider_id` | 不限制 | 仅渠道列表：正整数；若同时存在路径 ID，必须一致 |
+| `provider_id` | 不限制 | 渠道列表和模型选项：正整数；若同时存在服务商路径 ID，必须一致 |
+| `model` | 不限制 | 渠道与服务商列表：匹配渠道配置的完整模型名（非子串、非通配）；最多 255 字节，不能包含逗号或控制字符 |
+| `search` | 不限制 | 仅模型选项：按名称包含搜索，不参与目录渠道筛选，最多 128 字节 |
 
 - 默认只显示**在线且未降智**的渠道，两个条件均需明确的布尔观测；`NULL` 不视为在线或未降智。新/旧渠道默认没有观测，因此未填写结果前不会出现在默认列表。筛选不触发检测，也不保证实时可调用性。
-- `all` 取消对应观测条件，包含未知值；`unknown` 仅匹配 `NULL`。这两个参数也作用于服务商列表的可见性和 `channel_count`，不计入隐藏渠道。
+- `all` 取消对应观测条件，包含未知值；`unknown` 仅匹配 `NULL`。这些条件和 `model` 筛选也作用于服务商列表的可见性和 `channel_count`，不计入隐藏渠道。模型选项亦遵守当前在线/降智及服务商可见范围。
 - 无论筛选如何设置，仅公开 `status=1` 的已启用渠道，且其 Provider 必须存在且未软删除。`all` 不会绕过后台停用、自动禁用或服务商删除。
+- `model` 在主库查询时匹配逗号分隔的完整渠道模型标识（忽略渠道 `models` 列分隔符附近的空格），先过滤再计数、排序和分页；不能在当前页做假筛选。筛选只说明渠道**配置**包含该模型，当前质量、TTFT、最近检测仍是渠道级快照，**不表示模型独立测评**。模型选项按名称排序、分页，每页最多 100 条；`/api/public/models` 不支持 `model`、`sort_by`、`sort_order` 自身参数。
 - TTFT 升序/降序均将未知值放末尾，零毫秒是有效值；相同排序值使用渠道 ID 升序保证稳定分页。
 - 不存在、已删除或没有匹配渠道的服务商渠道列表返回成功空页（`items: []`），不会暴露其内部记录；服务商目录不包含匹配数为零的服务商。
 - 非法、重复、空、未知参数，以及非法分页/排序/筛选返回 HTTP 400；不会默默丢弃筛选。数据库故障返回 HTTP 500 和固定安全提示，不透出数据库错误。
@@ -103,6 +107,8 @@ Provider（购买/接入服务的服务商）
 GET /api/public/providers
 GET /api/public/providers/123/channels?sort_by=ttft&sort_order=asc
 GET /api/public/channels?sort_by=public_ratio&sort_order=asc&p=1&page_size=20
+GET /api/public/channels?model=gpt-5.2-codex&is_online=true
+GET /api/public/models?search=gpt-5&page_size=100
 GET /api/public/channels?is_online=false&is_degraded=all
 GET /api/public/channels?is_online=all&is_degraded=all
 ```
@@ -139,8 +145,8 @@ GET /api/public/channels?is_online=all&is_degraded=all
 | 方法 | 路径 | 行为 | 权限 |
 | --- | --- | --- | --- |
 | GET | `/api/providers/?p=1&page_size=20&keyword=example` | 分页列表，包含 `channel_count` | AdminAuth + `channel.read` |
-| POST | `/api/providers/` | 新建，接收 `name`、`description` | AdminAuth + `channel.write` |
-| PUT | `/api/providers/:id` | 更新名称与描述；描述可传空字符串清空 | AdminAuth + `channel.write` |
+| POST | `/api/providers/` | 新建，接收 `name`、`description`、可选 `skip_degradation_check` | AdminAuth + `channel.write` |
+| PUT | `/api/providers/:id` | 更新名称、描述和可选降智检测排除开关；描述可传空字符串清空 | AdminAuth + `channel.write` |
 | DELETE | `/api/providers/:id` | 无渠道引用时软删除 | AdminAuth + `channel.write` |
 
 Provider 写入记录管理审计。请求体不能覆盖 ID、创建时间、内部 code 或删除状态。

@@ -14,7 +14,7 @@ import (
 // parsePublicCatalogQuery rejects ambiguous/unknown inputs instead of silently
 // dropping a filter. In particular, clients cannot request a private projection
 // or sort by upstream pricing. Administrative query helpers are not reused.
-func parsePublicCatalogQuery(c *gin.Context, channelList bool) (model.PublicCatalogQuery, error) {
+func parsePublicCatalogQuery(c *gin.Context, channelList, modelOptions bool) (model.PublicCatalogQuery, error) {
 	query := model.PublicCatalogQuery{}
 	parameters, err := url.ParseQuery(c.Request.URL.RawQuery)
 	if err != nil {
@@ -42,6 +42,13 @@ func parsePublicCatalogQuery(c *gin.Context, channelList bool) (model.PublicCata
 			case "provider_id":
 				query.ProviderID = number
 			}
+		case "model":
+			query.Model = value
+		case "search":
+			if !modelOptions {
+				return query, errors.New("search is only supported for model options")
+			}
+			query.Search = value
 		case "is_online":
 			query.IsOnline = value
 		case "is_degraded":
@@ -75,8 +82,35 @@ func parsePublicCatalogQuery(c *gin.Context, channelList bool) (model.PublicCata
 	return query, nil
 }
 
+func ListPublicModels(c *gin.Context) {
+	if _, set := c.GetQuery("model"); set {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "model filtering is only supported for channel and provider lists"})
+		return
+	}
+	if _, set := c.GetQuery("sort_by"); set {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "sorting is not supported for model options"})
+		return
+	}
+	if _, set := c.GetQuery("sort_order"); set {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "sorting is not supported for model options"})
+		return
+	}
+	query, err := parsePublicCatalogQuery(c, true, true)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	items, total, err := model.ListPublicModels(query)
+	if err != nil {
+		common.SysError("failed to list public models: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "public catalog is temporarily unavailable"})
+		return
+	}
+	common.ApiSuccess(c, &common.PageInfo{Page: query.Page, PageSize: query.PageSize, Total: int(total), Items: items})
+}
+
 func ListPublicProviders(c *gin.Context) {
-	query, err := parsePublicCatalogQuery(c, false)
+	query, err := parsePublicCatalogQuery(c, false, false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
@@ -93,7 +127,7 @@ func ListPublicProviders(c *gin.Context) {
 // ListPublicChannels serves both the complete public list and a provider's
 // filtered list. Missing/deleted providers naturally produce an empty page.
 func ListPublicChannels(c *gin.Context) {
-	query, err := parsePublicCatalogQuery(c, true)
+	query, err := parsePublicCatalogQuery(c, true, false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return

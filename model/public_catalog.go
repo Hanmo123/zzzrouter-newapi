@@ -2,7 +2,9 @@ package model
 
 import (
 	"errors"
+	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -38,6 +40,8 @@ type PublicCatalogQuery struct {
 	Page       int
 	PageSize   int
 	ProviderID int
+	Model      string
+	Search     string
 	IsOnline   string
 	IsDegraded string
 	SortBy     string
@@ -59,6 +63,12 @@ func (query *PublicCatalogQuery) Normalize() error {
 	}
 	if query.ProviderID < 0 {
 		return errors.New("provider_id must be a positive integer")
+	}
+	if len(query.Model) > 255 || strings.TrimSpace(query.Model) != query.Model || strings.Contains(query.Model, ",") || strings.ContainsFunc(query.Model, unicode.IsControl) {
+		return errors.New("model must be one configured model name of at most 255 bytes")
+	}
+	if len(query.Search) > 128 || strings.TrimSpace(query.Search) != query.Search || strings.ContainsFunc(query.Search, unicode.IsControl) {
+		return errors.New("search must be at most 128 bytes without surrounding whitespace")
 	}
 	if query.IsOnline == "" {
 		query.IsOnline = "true"
@@ -104,6 +114,25 @@ func publicCatalogChannels(query PublicCatalogQuery) *gorm.DB {
 	if query.ProviderID > 0 {
 		channels = channels.Where("c.provider_id = ?", query.ProviderID)
 	}
+	if query.Model != "" {
+		// Match a complete comma-delimited model, never a substring or LIKE
+		// wildcard. Normalize whitespace around delimiters, not inside names:
+		// "model a" must never match "modela". Forms use at most one space;
+		// repeating also covers common hand-edited lists with extra spaces.
+		models := "c.models"
+		for range 4 {
+			models = "REPLACE(REPLACE(" + models + ", ', ', ','), ' ,', ',')"
+		}
+		name := "," + query.Model + ","
+		switch common.MainDatabaseType() {
+		case common.DatabaseTypeMySQL:
+			channels = channels.Where("LOCATE(BINARY ?, BINARY CONCAT(',', "+models+", ',')) > 0", name)
+		case common.DatabaseTypePostgreSQL:
+			channels = channels.Where("POSITION(? IN (',' || "+models+" || ',')) > 0", name)
+		default:
+			channels = channels.Where("INSTR(',' || "+models+" || ',', ?) > 0", name)
+		}
+	}
 	for _, filter := range []struct{ column, value string }{
 		{"c.is_online", query.IsOnline},
 		{"c.is_degraded", query.IsDegraded},
@@ -116,6 +145,42 @@ func publicCatalogChannels(query PublicCatalogQuery) *gorm.DB {
 		}
 	}
 	return channels
+}
+
+// ListPublicModels returns only models on channels visible under the same
+// status/provider conditions as the directory. No private channel columns are
+// selected, and pagination happens after deduplicating model tokens.
+func ListPublicModels(query PublicCatalogQuery) ([]string, int64, error) {
+	if err := query.Normalize(); err != nil {
+		return nil, 0, err
+	}
+	var texts []string
+	if err := publicCatalogChannels(query).Pluck("c.models", &texts).Error; err != nil {
+		return nil, 0, err
+	}
+	seen := make(map[string]struct{})
+	search := strings.ToLower(query.Search)
+	for _, text := range texts {
+		for item := range strings.SplitSeq(text, ",") {
+			name := strings.TrimSpace(item)
+			if name == "" || len(name) > 255 || strings.ContainsFunc(name, unicode.IsControl) ||
+				(search != "" && !strings.Contains(strings.ToLower(name), search)) {
+				continue
+			}
+			seen[name] = struct{}{}
+			if len(seen) > 10000 {
+				return nil, 0, errors.New("public model directory is too large")
+			}
+		}
+	}
+	models := make([]string, 0, len(seen))
+	for name := range seen {
+		models = append(models, name)
+	}
+	slices.Sort(models)
+	total := int64(len(models))
+	start := min((query.Page-1)*query.PageSize, len(models))
+	return models[start:min(start+query.PageSize, len(models))], total, nil
 }
 
 func ListPublicProviders(query PublicCatalogQuery) ([]PublicProvider, int64, error) {
