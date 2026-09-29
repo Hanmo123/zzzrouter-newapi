@@ -6832,6 +6832,16 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Frontend Configuration": "Frontend Configuration",
+    "Homepage quality board": "Homepage quality board",
+    "Choose which models appear on the homepage. The full leaderboard remains available to everyone.": "Choose which models appear on the homepage. The full leaderboard remains available to everyone.",
+    "Displayed models": "Displayed models",
+    "One model per line, in display order. Leave blank to show the public model directory (up to 100 models).": "One model per line, in display order. Leave blank to show the public model directory (up to 100 models).",
+    "Default selected model": "Default selected model",
+    "When models are specified above, the default must be included in the list.": "When models are specified above, the default must be included in the list.",
+    "Enter up to 100 unique model names, one per line": "Enter up to 100 unique model names, one per line",
+    "Default model must be one of the displayed models": "Default model must be one of the displayed models",
+    "Save settings": "Save settings"
   }
 }

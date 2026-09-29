@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -43,6 +44,22 @@ func requestPublicCatalog(t *testing.T, engine *gin.Engine, path string) (*httpt
 		assert.NotContains(t, recorder.Body.String(), secret)
 	}
 	return recorder, reply
+}
+
+func TestHomepageBoardConfigValidation(t *testing.T) {
+	for _, raw := range []string{
+		`{"models":["model-a"],"default_model":"model-b"}`,
+		`{"models":["model-a","model-a"],"default_model":"model-a"}`,
+		`{"models":["model-a,model-b"],"default_model":"model-a,model-b"}`,
+		`{"models":[],"default_model":""}`,
+		`not json`,
+	} {
+		_, err := setting.ParseHomepageBoardConfig(raw)
+		require.Error(t, err, raw)
+	}
+	config, err := setting.ParseHomepageBoardConfig(`{"models":[],"default_model":"gpt-6-astra"}`)
+	require.NoError(t, err)
+	assert.Empty(t, config.Models)
 }
 
 func TestPublicCatalogDatabaseMatrix(t *testing.T) {
@@ -95,7 +112,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			yes, no := true, false
 			zero, fast, slow, checked := int64(0), int64(100), int64(500), int64(1700000123)
 			privateRatio := 92837.625
-			baseURL, setting, remark := "https://private.example", `{"internal":"private-setting-canary"}`, "private-remark-canary"
+			baseURL, channelSetting, remark := "https://private.example", `{"internal":"private-setting-canary"}`, "private-remark-canary"
 			for _, row := range []struct {
 				id, provider, status int
 				ratio                float64
@@ -117,7 +134,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				{13, 104, 1, 0.03, &yes, &no, &fast},
 				{14, 999999, 1, 0.04, &yes, &no, &fast},
 			} {
-				channel := model.Channel{Id: row.id, ProviderID: row.provider, Status: row.status, Type: 1, Name: fmt.Sprintf("Channel %d", row.id), Models: "model-a,model-b", Group: "private-group", Key: "private-key-canary", PublicRatio: &row.ratio, UpstreamRatio: &privateRatio, IsOnline: row.online, IsDegraded: row.degraded, TTFTMs: row.ttft, LastCheckedAt: &checked, BaseURL: &baseURL, Setting: &setting, Remark: &remark}
+				channel := model.Channel{Id: row.id, ProviderID: row.provider, Status: row.status, Type: 1, Name: fmt.Sprintf("Channel %d", row.id), Models: "model-a,model-b", Group: "private-group", Key: "private-key-canary", PublicRatio: &row.ratio, UpstreamRatio: &privateRatio, IsOnline: row.online, IsDegraded: row.degraded, TTFTMs: row.ttft, LastCheckedAt: &checked, BaseURL: &baseURL, Setting: &channelSetting, Remark: &remark}
 				// Deliberately include legacy orphan/soft-deleted-provider rows to
 				// verify public visibility, bypassing normal association validation.
 				require.NoError(t, db.Create(&channel).Error)
@@ -302,9 +319,10 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					var options struct {
 						Success bool `json:"success"`
 						Data    struct {
-							Total        int      `json:"total"`
-							Items        []string `json:"items"`
-							DefaultModel string   `json:"default_model"`
+							Total          int      `json:"total"`
+							Items          []string `json:"items"`
+							DefaultModel   string   `json:"default_model"`
+							HomepageModels []string `json:"homepage_models"`
 						} `json:"data"`
 					}
 					require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &options))
@@ -312,7 +330,47 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					assert.Equal(t, scenario.total, options.Data.Total)
 					assert.Equal(t, scenario.models, options.Data.Items)
 					assert.Equal(t, "gpt-6-astra", options.Data.DefaultModel)
+					assert.Equal(t, []string{}, options.Data.HomepageModels)
 				}
+			})
+
+			t.Run("homepage settings are public metadata without restricting the directory", func(t *testing.T) {
+				common.OptionMapRWMutex.Lock()
+				wasNil := common.OptionMap == nil
+				if wasNil {
+					common.OptionMap = make(map[string]string)
+				}
+				previous, existed := common.OptionMap[setting.HomepageBoardOptionKey]
+				common.OptionMap[setting.HomepageBoardOptionKey] = `{"models":["model-b","model-a"],"default_model":"model-b"}`
+				common.OptionMapRWMutex.Unlock()
+				t.Cleanup(func() {
+					common.OptionMapRWMutex.Lock()
+					if existed {
+						common.OptionMap[setting.HomepageBoardOptionKey] = previous
+					} else {
+						delete(common.OptionMap, setting.HomepageBoardOptionKey)
+					}
+					if wasNil {
+						common.OptionMap = nil
+					}
+					common.OptionMapRWMutex.Unlock()
+				})
+				recorder := httptest.NewRecorder()
+				engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/public/models?page_size=2", nil))
+				require.Equal(t, http.StatusOK, recorder.Code)
+				var reply struct {
+					Data struct {
+						Items          []string `json:"items"`
+						Total          int      `json:"total"`
+						HomepageModels []string `json:"homepage_models"`
+						DefaultModel   string   `json:"default_model"`
+					} `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply))
+				assert.Equal(t, []string{"model-b", "model-a"}, reply.Data.HomepageModels)
+				assert.Equal(t, "model-b", reply.Data.DefaultModel)
+				assert.Equal(t, []string{"model-a", "model-b"}, reply.Data.Items)
+				assert.Equal(t, 2, reply.Data.Total)
 			})
 
 			t.Run("invalid and private query inputs are rejected", func(t *testing.T) {

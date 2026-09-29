@@ -293,6 +293,11 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case setting.HomepageBoardOptionKey:
+		if _, err := setting.ParseHomepageBoardConfig(option.Value.(string)); err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
 	case "GroupRatio":
 		err = ratio_setting.CheckGroupRatio(option.Value.(string))
 		if err != nil {

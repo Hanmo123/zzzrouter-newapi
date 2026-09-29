@@ -6832,6 +6832,16 @@
     "Zhipu": "智譜",
     "Zhipu GLM": "智譜GLM",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Frontend Configuration": "前端配置",
+    "Homepage quality board": "首頁即時品質榜",
+    "Choose which models appear on the homepage. The full leaderboard remains available to everyone.": "設定首頁顯示的模型；完整品質榜仍顯示公開模型目錄。",
+    "Displayed models": "顯示的模型",
+    "One model per line, in display order. Leave blank to show the public model directory (up to 100 models).": "每行一個模型，同類模型按填寫順序顯示。留空則顯示公開模型目錄（最多 100 個）。",
+    "Default selected model": "預設選中的模型",
+    "When models are specified above, the default must be included in the list.": "指定顯示模型時，預設模型必須包含在清單中。",
+    "Enter up to 100 unique model names, one per line": "每行填寫一個不重複的模型名稱，最多 100 個",
+    "Default model must be one of the displayed models": "預設模型必須是顯示的模型之一",
+    "Save settings": "儲存設定"
   }
 }

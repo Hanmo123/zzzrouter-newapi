@@ -53,6 +53,11 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
       title: t('System Administration'),
       items: [
         {
+          title: t('Frontend Configuration'),
+          icon: Layout,
+          url: '/system-settings/frontend',
+        },
+        {
           title: t('Site & Branding'),
           icon: Settings,
           items: getSiteSectionNavItems(t),
