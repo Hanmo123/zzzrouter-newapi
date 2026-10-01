@@ -13,13 +13,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WebAssets holds the embedded dashboard frontend assets.
+// WebAssets holds the dashboard assets or selects an API-only deployment.
 type WebAssets struct {
 	BuildFS   embed.FS
 	IndexPage []byte
+	APIOnly   bool
 }
 
 func SetWebRouter(router *gin.Engine, assets WebAssets, pluginDispatcher gin.HandlerFunc) {
+	if assets.APIOnly {
+		router.NoRoute(
+			pluginDispatcher,
+			middleware.RouteTag("api"),
+			middleware.AccessTokenAudit(),
+			controller.RelayNotFound,
+		)
+		return
+	}
 	frontendFS := common.EmbedFolder(assets.BuildFS, "web/dist")
 
 	router.NoRoute(

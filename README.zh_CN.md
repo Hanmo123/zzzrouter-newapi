@@ -240,7 +240,21 @@ docker compose logs -f new-api
 
 后端使用 Go 和 Gin；控制台使用 React 19、TypeScript、Rsbuild、TanStack 与 Tailwind CSS 4。前端依赖和脚本使用 Bun；Go 语言基线见 [go.mod](./go.mod)，容器构建工具链见 [Dockerfile](./Dockerfile)。
 
-后端会嵌入 `web/dist`，首次启动前先构建前端：
+本地开发推荐前后端分离，两个终端分别运行：
+
+```bash
+# 终端 1，仓库根目录：后端只提供 API，不依赖 web/dist
+make dev-api-local
+
+# 终端 2，仓库根目录：前端热更新，代理 API 到后端 :3001
+make dev-web-local
+```
+
+访问 [http://localhost:5173](http://localhost:5173)。前端修改由开发服务器热更新，无需重新编译或重启 Go；后端修改只需重启后端。分离模式下控制台在前端端口，后端端口的网页路径返回 JSON 404，不再提供内嵌控制台。端口可通过 `DEV_API_PORT` 和 `DEV_WEB_PORT` 调整。`web/.env.example` 中的 `API_PROXY_TARGET` 用于独立启动前端时指定后端地址，仅供前端服务器使用，不暴露给浏览器。API、SSE 和 WebSocket 请求保持同源代理，登录回调页面仍由前端处理。
+
+独立后端可通过 `make build-api` 或 `go build -tags api_only -o bin/new-api .` 构建。生产环境使用独立静态服务器（例如 Nginx）托管 `web/dist` 并反向代理 API；保留原有 HTTPS、可信 Origin 和可信代理配置，不通过分离部署绕过服务端安全检查。`make preview-web DEV_API_URL=http://127.0.0.1:3001` 可本地验证已构建前端及 API 代理，预览服务器不代替生产部署。
+
+默认单体构建仍兼容：后端会嵌入 `web/dist`，首次启动前先构建前端：
 
 ```bash
 # 仓库根目录

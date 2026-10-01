@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"log"
@@ -40,12 +39,6 @@ import (
 
 	_ "net/http/pprof"
 )
-
-//go:embed web/dist
-var buildFS embed.FS
-
-//go:embed web/dist/index.html
-var indexPage []byte
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "plugin" {
@@ -217,6 +210,7 @@ func main() {
 	router.SetRouter(server, router.WebAssets{
 		BuildFS:   buildFS,
 		IndexPage: indexPage,
+		APIOnly:   apiOnly,
 	})
 	var port = os.Getenv("PORT")
 	if port == "" {

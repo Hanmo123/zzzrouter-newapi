@@ -11,17 +11,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
   const serverUrl =
+    process.env.API_PROXY_TARGET ||
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
     'http://localhost:3000'
 
   const isProd = envMode === 'production'
-  const devProxy = Object.fromEntries(
-    (['/api', '/v1', '/mj', '/pg'] as const).map((key) => [
-      key,
-      { target: serverUrl, changeOrigin: true },
-    ])
-  ) as Record<string, { target: string; changeOrigin: boolean }>
+  const apiProxy = [
+    {
+      // Keep SPA paths on the frontend, including /oauth callbacks. Proxy only
+      // backend namespaces, without rewriting paths, cookies, or Origin.
+      pathFilter: (pathname: string) =>
+        /^\/(?:api|v1|v1beta|v2|mj|pg)(?:\/|$)/.test(pathname) ||
+        /^\/dashboard\/billing(?:\/|$)/.test(pathname) ||
+        /^\/[^/]+\/mj(?:\/|$)/.test(pathname),
+      target: serverUrl,
+      changeOrigin: true,
+      ws: true,
+    },
+  ]
 
   return {
     plugins: [pluginReact(), pluginTailwindcss({ optimize: false })],
@@ -68,8 +76,9 @@ export default defineConfig(({ envMode }) => {
     },
     server: {
       host: '0.0.0.0',
-      strictPort: false,
-      proxy: devProxy,
+      port: 5173,
+      strictPort: true,
+      proxy: apiProxy,
     },
     output: {
       // Production optimizations

@@ -1,6 +1,8 @@
 WEB_DIR = ./web
 API_DIR = .
 DEV_WEB_PORT ?= 5173
+DEV_API_PORT ?= 3001
+DEV_API_URL ?= http://127.0.0.1:3000
 DEV_COMPOSE_FILE = docker-compose.dev.yml
 DEV_POSTGRES_SERVICE = postgres
 DEV_API_SERVICE = new-api
@@ -8,7 +10,7 @@ DEV_POSTGRES_DB = new-api
 DEV_POSTGRES_USER = root
 DEV_SQLITE_PATH ?= one-api.db
 
-.PHONY: all build-web build-all-web start-api dev dev-api dev-api-rebuild dev-web reset-setup test
+.PHONY: all build-web build-all-web build-api start-api dev dev-api dev-api-local dev-api-rebuild dev-web dev-web-local preview-web reset-setup test
 
 all: build-all-web start-api
 
@@ -19,9 +21,17 @@ build-web:
 
 build-all-web: build-web
 
+build-api:
+	@echo "Building API-only backend (no web/dist required)..."
+	@cd $(API_DIR) && go build -tags api_only -o bin/new-api .
+
 start-api:
 	@echo "Starting api dev server..."
-	@cd $(API_DIR) && go run main.go &
+	@cd $(API_DIR) && go run . &
+
+dev-api-local:
+	@echo "Starting local API-only backend on :$(DEV_API_PORT)..."
+	@cd $(API_DIR) && PORT=$(DEV_API_PORT) go run -tags api_only .
 
 dev-api:
 	@echo "Starting api services (docker)..."
@@ -34,8 +44,16 @@ dev-api-rebuild:
 dev-web:
 	@echo "Starting web frontend dev server..."
 	@echo "Web frontend: http://localhost:$(DEV_WEB_PORT)"
-	@cd $(WEB_DIR) && bun install
-	@cd $(WEB_DIR) && bun run dev -- --host 0.0.0.0 --port $(DEV_WEB_PORT)
+	@cd $(WEB_DIR) && bun install --frozen-lockfile
+	@echo "API proxy target: $(DEV_API_URL)"
+	@cd $(WEB_DIR) && API_PROXY_TARGET=$(DEV_API_URL) bun run dev -- --host 0.0.0.0 --port $(DEV_WEB_PORT)
+
+# Local backend and frontend run in separate terminals; Docker dev keeps :3000.
+dev-web-local: DEV_API_URL = http://127.0.0.1:$(DEV_API_PORT)
+dev-web-local: dev-web
+
+preview-web:
+	@cd $(WEB_DIR) && API_PROXY_TARGET=$(DEV_API_URL) bun run preview -- --host 0.0.0.0 --port $(DEV_WEB_PORT)
 
 dev: dev-api dev-web
 
