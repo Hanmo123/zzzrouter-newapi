@@ -23,6 +23,7 @@ import {
   createMemoryHistory,
   RouterContextProvider,
 } from '@tanstack/react-router'
+import type { Row } from '@tanstack/react-table'
 import {
   act,
   cleanup,
@@ -49,7 +50,13 @@ import {
 } from '../../constants'
 import { channelSchema, type Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
+import {
+  ChannelRowActionsLayoutContext,
+  type ChannelRowActionsLayout,
+} from '../channel-row-actions-context'
+import { ChannelsDialogs } from '../channels-dialogs'
 import { ChannelsProvider } from '../channels-provider'
+import { DataTableRowActions } from '../data-table-row-actions'
 import { ChannelMutateDrawer } from '../drawers/channel-mutate-drawer'
 
 const originalAuth = useAuthStore.getState().auth
@@ -101,6 +108,7 @@ function deferredResponse<T>() {
 function ConfigurationHarness(props: {
   initialOpen?: boolean
   currentRow?: Channel
+  copySource?: Channel
   clearRowOnClose?: boolean
 }) {
   const [open, setOpen] = useState(props.initialOpen ?? true)
@@ -123,7 +131,33 @@ function ConfigurationHarness(props: {
             currentRow={
               open || !props.clearRowOnClose ? props.currentRow : null
             }
+            copySource={open ? props.copySource : null}
           />
+        </ChannelsProvider>
+      </RouterContextProvider>
+    </QueryClientProvider>
+  )
+}
+
+function RowActionsHarness(props: { layout?: ChannelRowActionsLayout }) {
+  const [router] = useState(() =>
+    createRouter({
+      routeTree: createRootRoute(),
+      history: createMemoryHistory({ initialEntries: ['/'] }),
+    })
+  )
+  return (
+    <QueryClientProvider client={client}>
+      <RouterContextProvider router={router}>
+        <ChannelsProvider>
+          <ChannelRowActionsLayoutContext.Provider
+            value={props.layout ?? 'table'}
+          >
+            <DataTableRowActions
+              row={{ original: editingChannel } as Row<Channel>}
+            />
+            <ChannelsDialogs />
+          </ChannelRowActionsLayoutContext.Provider>
         </ChannelsProvider>
       </RouterContextProvider>
     </QueryClientProvider>
@@ -232,6 +266,170 @@ function useWideScreen() {
     toJSON: () => ({}),
   } as DOMRect)
 }
+
+test('the channel Copy action opens a create draft without calling the copy API', async () => {
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<RowActionsHarness />)
+  await user.click(screen.getByRole('button', { name: 'Open menu' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Copy Channel' }))
+  await screen.findByDisplayValue('Existing channel_copy')
+  expect(screen.getByRole('heading', { name: 'Copy Channel' })).toBeVisible()
+  expect(screen.getByLabelText('API Key *')).toHaveValue('')
+  expect(post).not.toHaveBeenCalled()
+})
+
+test.each(['table', 'card'] as const)(
+  '%s view exposes a labeled Copy button that opens a draft without expanding the menu',
+  async (layout) => {
+    const post = vi
+      .spyOn(api, 'post')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<RowActionsHarness layout={layout} />)
+    const copy = screen.getByRole('button', { name: 'Copy Channel' })
+    expect(copy).toBeVisible()
+    expect(copy).toHaveTextContent('Copy')
+    copy.focus()
+    await user.keyboard('{Enter}')
+    await screen.findByDisplayValue('Existing channel_copy')
+    expect(screen.getByRole('heading', { name: 'Copy Channel' })).toBeVisible()
+    expect(post).not.toHaveBeenCalled()
+  }
+)
+
+test('the visible Copy button is disabled when the user cannot create channels', async () => {
+  useAuthStore.setState({
+    auth: {
+      ...originalAuth,
+      user: { id: 2, username: 'operator', role: ROLE.ADMIN },
+    },
+  })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<RowActionsHarness />)
+  const copy = screen.getByRole('button', { name: 'Copy Channel' })
+  expect(copy).toBeVisible()
+  expect(copy).toBeDisabled()
+  await user.click(copy)
+  expect(
+    screen.queryByRole('heading', { name: 'Copy Channel' })
+  ).not.toBeInTheDocument()
+  expect(post).not.toHaveBeenCalled()
+})
+
+test('copying a channel prefills an editable create draft but waits for explicit submission and a new key', async () => {
+  editingChannel.name = 'Source channel'
+  editingChannel.models = 'model-one,model-two'
+  editingChannel.public_ratio = 0.7
+  editingChannel.model_mapping = '{"model-one":"upstream-one"}'
+  editingChannel.key = ''
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness copySource={editingChannel} />)
+
+  expect(
+    await screen.findByRole('heading', { name: 'Copy Channel' })
+  ).toBeVisible()
+  await screen.findByDisplayValue('Source channel_copy')
+  expect(screen.getByLabelText('Name *')).toHaveValue('Source channel_copy')
+  expect(screen.getByLabelText(/Base URL/)).toHaveValue('https://saved.example')
+  expect(screen.getByLabelText('API Key *')).toHaveValue('')
+  expect(screen.getByText('model-one')).toBeVisible()
+  expect(screen.getByText('model-two')).toBeVisible()
+  expect(
+    screen.getByText(
+      'Enter a new API key to create the copy. The source key is not available in this form.'
+    )
+  ).toBeVisible()
+  expect(post).not.toHaveBeenCalled()
+  expect(put).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText('Name *'), {
+    target: { value: 'Edited copy' },
+  })
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['channels', 'detail', 42] })
+  })
+  expect(screen.getByLabelText('Name *')).toHaveValue('Edited copy')
+  expect(post).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Create Channel' }))
+  expect(post).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText('API Key *'), {
+    target: { value: 'new-secret' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Create Channel' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/channel',
+      expect.objectContaining({
+        channel: expect.objectContaining({
+          name: 'Edited copy',
+          key: 'new-secret',
+          models: 'model-one,model-two',
+          model_mapping: '{"model-one":"upstream-one"}',
+          public_ratio: 0.7,
+        }),
+      }),
+      expect.anything()
+    )
+  )
+  expect(put).not.toHaveBeenCalled()
+})
+
+test('cancelling a copied channel discards edits and creates nothing', async () => {
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness copySource={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel_copy')
+  fireEvent.change(screen.getByLabelText('Name *'), {
+    target: { value: 'Unsaved name' },
+  })
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(post).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Open channel' }))
+  await screen.findByDisplayValue('Existing channel_copy')
+  expect(screen.getByLabelText('Name *')).toHaveValue('Existing channel_copy')
+  expect(post).not.toHaveBeenCalled()
+})
+
+test('copying a channel with unavailable details blocks creation until the source can be loaded', async () => {
+  const get = vi.mocked(api.get)
+  const originalGet = get.getMockImplementation()
+  let unavailable = true
+  get.mockImplementation(async (url, config) => {
+    if (url === '/api/channel/42' && unavailable) {
+      return { data: { success: false, message: 'detail unavailable' } }
+    }
+    if (!originalGet) throw new Error('Missing test GET handler')
+    return originalGet(url, config)
+  })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness copySource={editingChannel} />)
+
+  expect(await screen.findByText('Failed to load channel')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Create Channel' })).toBeDisabled()
+  expect(post).not.toHaveBeenCalled()
+  unavailable = false
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  await screen.findByDisplayValue('Existing channel_copy')
+  expect(screen.getByRole('button', { name: 'Create Channel' })).toBeEnabled()
+  expect(post).not.toHaveBeenCalled()
+})
 
 test('changing built-in providers updates server-provided URL placeholders without replacing the draft address', async () => {
   const user = userEvent.setup()

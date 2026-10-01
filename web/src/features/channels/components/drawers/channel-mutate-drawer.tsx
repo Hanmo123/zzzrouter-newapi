@@ -254,6 +254,7 @@ type ChannelMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: Channel | null
+  copySource?: Channel | null
 }
 
 type ModelMappingGuardrail = {
@@ -406,6 +407,7 @@ export function ChannelMutateDrawer({
   open,
   onOpenChange,
   currentRow,
+  copySource,
 }: ChannelMutateDrawerProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -460,6 +462,7 @@ export function ChannelMutateDrawer({
     useState<ChannelConnectionInfo | null>(null)
 
   const isEditing = Boolean(currentRow)
+  const isCopying = !isEditing && Boolean(copySource)
   const requestedSide = isEditing ? 'left' : 'right'
   const [drawerSide, setDrawerSide] = useState<'left' | 'right'>(requestedSide)
   // The parent clears currentRow as soon as closing starts. Keep the last
@@ -467,7 +470,7 @@ export function ChannelMutateDrawer({
   if (open && drawerSide !== requestedSide) {
     setDrawerSide(requestedSide)
   }
-  const channelId = currentRow?.id ?? null
+  const channelId = currentRow?.id ?? copySource?.id ?? null
   const sensitiveLocked = isEditing && !canEditSensitive
   const [providerTarget, setProviderTarget] =
     useState<ChannelProviderTarget | null>(null)
@@ -505,7 +508,9 @@ export function ChannelMutateDrawer({
   const redirectPanelActive =
     redirectPanelOpen && viewportWide && redirectPanelPlacement !== null
   const showProviderPicker =
-    choosingProvider && (!isEditing || Boolean(providerTarget))
+    choosingProvider &&
+    (!isEditing || Boolean(providerTarget)) &&
+    (!isCopying || Boolean(providerTarget))
   const providerControlRef = useRef<HTMLButtonElement>(null)
   const previousProviderPicker = useRef(false)
   useEffect(() => {
@@ -514,9 +519,11 @@ export function ChannelMutateDrawer({
     }
     previousProviderPicker.current = showProviderPicker
   }, [open, showProviderPicker])
-  const loadedForm = useRef<{ channelId: number; snapshot: string } | null>(
-    null
-  )
+  const loadedForm = useRef<{
+    channelId: number
+    mode: 'edit' | 'copy'
+    snapshot: string
+  } | null>(null)
 
   const { data: defaultBaseURLs } = useQuery({
     queryKey: channelsQueryKeys.defaultBaseURLs(),
@@ -526,7 +533,7 @@ export function ChannelMutateDrawer({
     staleTime: 5 * 60 * 1000,
   })
 
-  // Fetch channel details if editing
+  // Copy and edit both use the sanitized detail endpoint (no API key).
   const {
     data: channelData,
     isLoading: isChannelLoading,
@@ -536,7 +543,7 @@ export function ChannelMutateDrawer({
   } = useQuery({
     queryKey: channelsQueryKeys.detail(channelId || 0),
     queryFn: async () => requireServerSuccess(await getChannel(channelId || 0)),
-    enabled: open && isEditing && Boolean(channelId),
+    enabled: open && (isEditing || isCopying) && Boolean(channelId),
     meta: { errorToast: false },
   })
 
@@ -661,7 +668,7 @@ export function ChannelMutateDrawer({
   }, [applyConnectionInfo, t])
 
   useEffect(() => {
-    if (!open || isEditing || showProviderPicker) {
+    if (!open || isEditing || isCopying || showProviderPicker) {
       setClipboardConnectionInfo(null)
       return
     }
@@ -684,12 +691,12 @@ export function ChannelMutateDrawer({
     return () => {
       cancelled = true
     }
-  }, [isEditing, open, showProviderPicker])
+  }, [isEditing, isCopying, open, showProviderPicker])
 
   // Helper computed values
   const isBatchMode =
     multiKeyMode === 'batch' || multiKeyMode === 'multi_to_single'
-  const isChannelDetailLoading = isEditing && isChannelLoading
+  const isChannelDetailLoading = (isEditing || isCopying) && isChannelLoading
   const supportsMultiKeyAddMode =
     currentType !== 57 && !(currentType === 41 && vertexKeyType === 'api_key')
   const addModeOptions = useMemo(
@@ -1037,8 +1044,11 @@ export function ChannelMutateDrawer({
       setPendingErrorFocus(null)
       return
     }
-    if (isEditing && channelData?.data) {
-      const isNewChannel = loadedForm.current?.channelId !== channelId
+    if ((isEditing || isCopying) && channelData?.data) {
+      const mode = isEditing ? 'edit' : 'copy'
+      const isNewChannel =
+        loadedForm.current?.channelId !== channelId ||
+        loadedForm.current?.mode !== mode
       // Model selectors also change values without setting RHF's dirty flag.
       // Refresh untouched forms, while retaining every kind of unsaved input.
       if (
@@ -1048,9 +1058,11 @@ export function ChannelMutateDrawer({
         return
       }
       const defaults = transformChannelToFormDefaults(channelData.data)
+      if (isCopying) defaults.name = `${defaults.name}_copy`
       form.reset(defaults)
       loadedForm.current = {
         channelId: channelData.data.id,
+        mode,
         snapshot: JSON.stringify(form.getValues()),
       }
       setProviderTarget(
@@ -1071,13 +1083,13 @@ export function ChannelMutateDrawer({
       initialModelMappingRef.current = channelData.data.model_mapping || ''
       initialStatusCodeMappingRef.current =
         channelData.data.status_code_mapping || ''
-    } else if (!isEditing) {
+    } else if (!isEditing && !isCopying) {
       form.reset(CHANNEL_FORM_DEFAULT_VALUES)
       initialModelsRef.current = []
       initialModelMappingRef.current = ''
       initialStatusCodeMappingRef.current = ''
     }
-  }, [isEditing, channelId, channelData, form, open])
+  }, [isEditing, isCopying, channelId, channelData, form, open])
 
   // Handle type change - set default values for specific types
   useEffect(() => {
@@ -4596,9 +4608,9 @@ export function ChannelMutateDrawer({
   )
 
   let formContent: ReactNode
-  if (!isEditing && !providerTarget) {
+  if (!isEditing && !isCopying && !providerTarget) {
     formContent = null
-  } else if (isEditing && isChannelError && !channelData?.data) {
+  } else if ((isEditing || isCopying) && isChannelError && !channelData?.data) {
     formContent = (
       <ErrorState
         title={t('Failed to load channel')}
@@ -4613,6 +4625,8 @@ export function ChannelMutateDrawer({
     )
   } else if (isChannelDetailLoading) {
     formContent = <ChannelEditorLoadingState />
+  } else if (!providerTarget) {
+    formContent = null
   } else {
     formContent = (
       <ChannelConfiguration
@@ -4725,8 +4739,19 @@ export function ChannelMutateDrawer({
     description = t(
       "Update channel configuration and click save when you're done."
     )
+  } else if (isCopying && !showProviderPicker) {
+    description = t(
+      'Review the copied channel settings, then click Create Channel to save.'
+    )
   } else if (showProviderPicker) {
     description = t('Choose a provider or plugin to configure your channel.')
+  }
+
+  let drawerTitle = t('Create Channel')
+  if (isEditing) {
+    drawerTitle = t('Edit Channel')
+  } else if (isCopying) {
+    drawerTitle = t('Copy Channel')
   }
 
   return (
@@ -4744,9 +4769,7 @@ export function ChannelMutateDrawer({
                     <IconBadge tone='info' size='title'>
                       <Server className='size-5' />
                     </IconBadge>
-                    <span>
-                      {isEditing ? t('Edit Channel') : t('Create Channel')}
-                    </span>
+                    <span>{drawerTitle}</span>
                   </SheetTitle>
                   {(!showProviderPicker || providerTarget) && (
                     <Button
@@ -4765,7 +4788,7 @@ export function ChannelMutateDrawer({
                         isSubmitting ||
                         (!showProviderPicker &&
                           (!canEditSensitive ||
-                            (isEditing && !channelData?.data)))
+                            ((isEditing || isCopying) && !channelData?.data)))
                       }
                       onClick={() => setChoosingProvider(!showProviderPicker)}
                     >
@@ -4869,6 +4892,16 @@ export function ChannelMutateDrawer({
             />
           )}
 
+          {isCopying && !showProviderPicker && channelData?.data && (
+            <Alert>
+              <AlertDescription>
+                {t(
+                  'Enter a new API key to create the copy. The source key is not available in this form.'
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
           {sensitiveLocked && (
             <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>
               <AlertDescription>
@@ -4882,30 +4915,35 @@ export function ChannelMutateDrawer({
             </Alert>
           )}
 
-          {!isEditing && !showProviderPicker && clipboardConnectionInfo && (
-            <Alert>
-              <AlertDescription className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-                <span>{t('Connection info detected in clipboard')}</span>
-                <span className='flex shrink-0 gap-2'>
-                  <Button
-                    type='button'
-                    size='sm'
-                    onClick={() => applyConnectionInfo(clipboardConnectionInfo)}
-                  >
-                    {t('Fill in')}
-                  </Button>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='sm'
-                    onClick={() => setClipboardConnectionInfo(null)}
-                  >
-                    {t('Ignore')}
-                  </Button>
-                </span>
-              </AlertDescription>
-            </Alert>
-          )}
+          {!isEditing &&
+            !isCopying &&
+            !showProviderPicker &&
+            clipboardConnectionInfo && (
+              <Alert>
+                <AlertDescription className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                  <span>{t('Connection info detected in clipboard')}</span>
+                  <span className='flex shrink-0 gap-2'>
+                    <Button
+                      type='button'
+                      size='sm'
+                      onClick={() =>
+                        applyConnectionInfo(clipboardConnectionInfo)
+                      }
+                    >
+                      {t('Fill in')}
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setClipboardConnectionInfo(null)}
+                    >
+                      {t('Ignore')}
+                    </Button>
+                  </span>
+                </AlertDescription>
+              </Alert>
+            )}
 
           <Form {...form}>
             <form
@@ -4951,7 +4989,8 @@ export function ChannelMutateDrawer({
                 disabled={
                   isSubmitting ||
                   (!isEditing && !canEditSensitive) ||
-                  (isEditing && !channelData?.data)
+                  ((isEditing || isCopying) &&
+                    (!channelData?.data || !providerTarget))
                 }
               >
                 {isSubmitting && (

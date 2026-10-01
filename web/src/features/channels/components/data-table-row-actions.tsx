@@ -133,6 +133,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   }
 
   const handleCopy = () => {
+    if (!canEditSensitive) return
     setCurrentRow(channel)
     setOpen('copy-channel')
   }
@@ -183,6 +184,26 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           <TooltipContent>{t('Edit')}</TooltipContent>
         </Tooltip>
       )}
+
+      <Button
+        type='button'
+        variant='outline'
+        size='sm'
+        aria-label={t('Copy Channel')}
+        title={
+          canEditSensitive
+            ? t('Copy Channel')
+            : t('No permission to perform this action')
+        }
+        disabled={!canEditSensitive}
+        onClick={(e) => {
+          e.stopPropagation()
+          handleCopy()
+        }}
+      >
+        <Copy data-icon='inline-start' aria-hidden='true' />
+        {t('Copy')}
+      </Button>
 
       <Tooltip>
         <TooltipTrigger

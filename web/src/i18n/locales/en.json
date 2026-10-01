@@ -1494,6 +1494,8 @@
     "Copy billing expression": "Copy billing expression",
     "Copy callback URL": "Copy callback URL",
     "Copy Channel": "Copy Channel",
+    "Review the copied channel settings, then click Create Channel to save.": "Review the copied channel settings, then click Create Channel to save.",
+    "Enter a new API key to create the copy. The source key is not available in this form.": "Enter a new API key to create the copy. The source key is not available in this form.",
     "Copy code": "Copy code",
     "Copy Connection Info": "Copy Connection Info",
     "Copy endpoint path": "Copy endpoint path",

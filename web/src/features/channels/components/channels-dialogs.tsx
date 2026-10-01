@@ -20,7 +20,6 @@ import { CHANNEL_TYPE_VLLM, CHANNEL_TYPE_SGLANG } from '../constants'
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
-import { CopyChannelDialog } from './dialogs/copy-channel-dialog'
 import { EditTagDialog } from './dialogs/edit-tag-dialog'
 import { FetchModelsDialog } from './dialogs/fetch-models-dialog'
 import { InferenceStatusDialog } from './dialogs/inference-status-dialog'
@@ -52,9 +51,14 @@ export function ChannelsDialogs() {
         )}
       {/* Channel Create/Update Drawer */}
       <ChannelMutateDrawer
-        open={open === 'create-channel' || open === 'update-channel'}
+        open={
+          open === 'create-channel' ||
+          open === 'update-channel' ||
+          open === 'copy-channel'
+        }
         onOpenChange={(v) => !v && setOpen(null)}
         currentRow={open === 'update-channel' ? currentRow : null}
+        copySource={open === 'copy-channel' ? currentRow : null}
       />
 
       {/* Test Channel Dialog */}
@@ -78,12 +82,6 @@ export function ChannelsDialogs() {
       {/* Ollama Models Dialog */}
       <OllamaModelsDialog
         open={open === 'ollama-models'}
-        onOpenChange={(v) => !v && setOpen(null)}
-      />
-
-      {/* Copy Channel Dialog */}
-      <CopyChannelDialog
-        open={open === 'copy-channel'}
         onOpenChange={(v) => !v && setOpen(null)}
       />
 

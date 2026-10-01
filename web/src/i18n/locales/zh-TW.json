@@ -1494,6 +1494,8 @@
     "Copy billing expression": "複製計費運算式",
     "Copy callback URL": "複製回呼 URL",
     "Copy Channel": "複製渠道",
+    "Review the copied channel settings, then click Create Channel to save.": "已填入來源渠道設定。請確認或修改後點擊「建立渠道」儲存。",
+    "Enter a new API key to create the copy. The source key is not available in this form.": "來源渠道金鑰不會自動填入。請填寫新金鑰後再建立渠道。",
     "Copy code": "複製代碼",
     "Copy Connection Info": "複製連接資訊",
     "Copy endpoint path": "複製端點路徑",
