@@ -14,7 +14,7 @@ export default defineConfig(({ envMode }) => {
     process.env.API_PROXY_TARGET ||
     process.env.VITE_REACT_APP_SERVER_URL ||
     env.rawPublicVars.VITE_REACT_APP_SERVER_URL ||
-    'http://localhost:3000'
+    'http://127.0.0.1:3002'
 
   const isProd = envMode === 'production'
   const apiProxy = [
@@ -76,7 +76,7 @@ export default defineConfig(({ envMode }) => {
     },
     server: {
       host: '0.0.0.0',
-      port: 5173,
+      port: 3001,
       strictPort: true,
       proxy: apiProxy,
     },

@@ -111,6 +111,23 @@ after(async () => {
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 
+test('standalone frontend defaults to port 3001 with the backend proxy on port 3002', async () => {
+  const keys = ['API_PROXY_TARGET', 'VITE_REACT_APP_SERVER_URL']
+  const previous = new Map(keys.map((key) => [key, process.env[key]]))
+  for (const key of keys) delete process.env[key]
+  try {
+    const config = (await loadConfig({ cwd: root, envMode: 'development' }))
+      .content
+    assert.equal(config.server.port, 3001)
+    assert.equal(config.server.proxy[0].target, 'http://127.0.0.1:3002')
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+})
+
 test('API requests preserve method, path, query, body, authorization, cookie and Origin', async () => {
   const response = await fetch(`${origin}/api/example?q=one`, {
     method: 'POST',

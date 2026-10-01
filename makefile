@@ -1,8 +1,9 @@
 WEB_DIR = ./web
 API_DIR = .
-DEV_WEB_PORT ?= 5173
-DEV_API_PORT ?= 3001
-DEV_API_URL ?= http://127.0.0.1:3000
+# Legacy aliases; new development commands live in package.json (bun run dev).
+DEV_WEB_PORT ?= 3001
+DEV_API_PORT ?= 3002
+DEV_API_URL ?= http://127.0.0.1:$(DEV_API_PORT)
 DEV_COMPOSE_FILE = docker-compose.dev.yml
 DEV_POSTGRES_SERVICE = postgres
 DEV_API_SERVICE = new-api
@@ -22,16 +23,14 @@ build-web:
 build-all-web: build-web
 
 build-api:
-	@echo "Building API-only backend (no web/dist required)..."
-	@cd $(API_DIR) && go build -tags api_only -o bin/new-api .
+	@bun run build:api
 
 start-api:
 	@echo "Starting api dev server..."
 	@cd $(API_DIR) && go run . &
 
 dev-api-local:
-	@echo "Starting local API-only backend on :$(DEV_API_PORT)..."
-	@cd $(API_DIR) && PORT=$(DEV_API_PORT) go run -tags api_only .
+	@DEV_API_PORT=$(DEV_API_PORT) bun run dev:api
 
 dev-api:
 	@echo "Starting api services (docker)..."
@@ -48,12 +47,12 @@ dev-web:
 	@echo "API proxy target: $(DEV_API_URL)"
 	@cd $(WEB_DIR) && API_PROXY_TARGET=$(DEV_API_URL) bun run dev -- --host 0.0.0.0 --port $(DEV_WEB_PORT)
 
-# Local backend and frontend run in separate terminals; Docker dev keeps :3000.
-dev-web-local: DEV_API_URL = http://127.0.0.1:$(DEV_API_PORT)
-dev-web-local: dev-web
+# Compatibility aliases delegate to the Bun commands.
+dev-web-local:
+	@DEV_API_PORT=$(DEV_API_PORT) DEV_WEB_PORT=$(DEV_WEB_PORT) API_PROXY_TARGET=$(DEV_API_URL) bun run dev:web
 
 preview-web:
-	@cd $(WEB_DIR) && API_PROXY_TARGET=$(DEV_API_URL) bun run preview -- --host 0.0.0.0 --port $(DEV_WEB_PORT)
+	@DEV_WEB_PORT=$(DEV_WEB_PORT) API_PROXY_TARGET=$(DEV_API_URL) bun run preview:web
 
 dev: dev-api dev-web
 
