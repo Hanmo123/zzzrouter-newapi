@@ -1,13 +1,16 @@
 package router
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -89,7 +92,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			model.DB = db
 			common.SetMainDatabaseType(common.DatabaseType(dialect))
 			t.Cleanup(func() {
-				require.NoError(t, db.Migrator().DropTable(&model.Channel{}, &model.Provider{}))
+				require.NoError(t, db.Migrator().DropTable(&model.ChannelDegradationSample{}, &model.Channel{}, &model.Provider{}))
 				model.DB = previousDB
 				common.SetMainDatabaseType(previousType)
 				require.NoError(t, sqlDB.Close())
@@ -101,7 +104,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			}
 			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 			t.Logf("database version: %s", version)
-			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}))
+			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}))
 			providers := []model.Provider{
 				{ID: 101, Code: "private-code-a", Name: "Provider A", Description: "private-provider-description"},
 				{ID: 102, Code: "private-code-b", Name: "Provider B", Description: "private-provider-description"},
@@ -373,6 +376,127 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				assert.Equal(t, 2, reply.Data.Total)
 			})
 
+			t.Run("append-only evaluation history survives migration and is safely published by provider", func(t *testing.T) {
+				now := time.Now().UnixMilli()
+				today := now / model.EvaluationDayMs * model.EvaluationDayMs
+				zero, hundred, twoHundred := int64(0), int64(100), int64(200)
+				for i, fact := range []struct {
+					channel     int
+					at          int64
+					state, name string
+					ttft        *int64
+				}{
+					{1, today - 2*model.EvaluationDayMs + 1000, "normal", "model-a", &zero},
+					{1, today - 2*model.EvaluationDayMs + 2000, "normal", "model-a", &hundred},
+					{1, today - model.EvaluationDayMs + 1000, "abnormal", "model-a", &twoHundred},
+					{1, today - model.EvaluationDayMs + 2000, "error", "model-b", nil},
+					{7, today - model.EvaluationDayMs + 3000, "error", "model-a", nil},
+					{11, today - model.EvaluationDayMs + 1000, "normal", "private-model-canary", &hundred},
+					{3, today - model.EvaluationDayMs + 1000, "normal", "model-a", &hundred},
+					{1, today - 10*model.EvaluationDayMs, "normal", "model-a", &hundred},
+					{1, today + model.EvaluationDayMs, "normal", "model-a", &hundred},
+				} {
+					var source model.Channel
+					require.NoError(t, db.First(&source, fact.channel).Error)
+					sample := model.ChannelDegradationSample{ID: fmt.Sprintf("history-%d", i), State: fact.state, Model: fact.name, UpstreamModel: "private-upstream-model-canary", StartedAt: fact.at, CompletedAt: fact.at + 500, DurationMs: 500, TTFTMs: fact.ttft}
+					require.NoError(t, model.RecordChannelDegradation(context.Background(), &source, &sample, "", true))
+				}
+				var source model.Channel
+				require.NoError(t, db.First(&source, 1).Error)
+				cancelled := model.ChannelDegradationSample{ID: "cancelled-attempt", State: "error", ErrorCode: "cancelled", Model: "model-b", StartedAt: today - model.EvaluationDayMs + 2500, CompletedAt: today - model.EvaluationDayMs + 2500}
+				require.NoError(t, model.AppendChannelDegradationHistory(context.Background(), &source, &cancelled))
+				for _, sample := range []model.ChannelDegradationSample{
+					{ID: "replaced-instance", ChannelID: 1, ChannelInstanceID: "old-instance", ProviderID: 101, Model: "model-a", State: "normal", StartedAt: today - model.EvaluationDayMs},
+					{ID: "reassigned-provider", ChannelID: 1, ChannelInstanceID: *source.InstanceID, ProviderID: 102, Model: "model-a", State: "normal", StartedAt: today - model.EvaluationDayMs},
+				} {
+					require.NoError(t, db.Create(&sample).Error)
+				}
+				// Simulate an upgrade from the pre-timeseries-index schema, then
+				// run the exact GORM migration twice and verify retained facts.
+				for _, index := range []string{"idx_evaluation_provider_time", "idx_evaluation_instance_time"} {
+					require.NoError(t, db.Migrator().DropIndex(&model.ChannelDegradationSample{}, index))
+				}
+				for range 2 {
+					require.NoError(t, db.AutoMigrate(&model.ChannelDegradationSample{}))
+				}
+				for _, index := range []string{"idx_evaluation_provider_time", "idx_evaluation_instance_time"} {
+					assert.True(t, db.Migrator().HasIndex(&model.ChannelDegradationSample{}, index))
+				}
+				var preserved model.ChannelDegradationSample
+				require.NoError(t, db.First(&preserved, "id = ?", "history-0").Error)
+				require.NotNil(t, preserved.TTFTMs)
+				assert.EqualValues(t, 0, *preserved.TTFTMs)
+				assert.Error(t, model.RecordChannelDegradation(context.Background(), &source, &preserved, "", true), "duplicate facts cannot overwrite history")
+
+				for _, scenario := range []struct {
+					path          string
+					total, online int64
+				}{
+					{"/api/public/providers/101/history?days=7", 6, 3},
+					{"/api/public/providers/101/history?days=90", 7, 4},
+					{"/api/public/providers/101/history?days=7&model=model-a", 4, 3},
+					{"/api/public/providers/101/history?days=7&channel_id=1", 5, 3},
+					{"/api/public/providers/101/history?days=7&channel_id=3", 0, 0},
+					{"/api/public/providers/102/history?days=7", 1, 1},
+					{"/api/public/providers/104/history?days=7", 0, 0},
+					{"/api/public/providers/999999/history?days=7", 0, 0},
+				} {
+					recorder := httptest.NewRecorder()
+					engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, scenario.path, nil))
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					for _, secret := range []string{"channel_instance_id", "upstream_model", "private-upstream-model-canary", "private-model-canary", "private-key-canary", "private.example", "task_id"} {
+						assert.NotContains(t, recorder.Body.String(), secret)
+					}
+					var reply struct {
+						Success bool                        `json:"success"`
+						Data    model.PublicProviderHistory `json:"data"`
+					}
+					require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply))
+					assert.True(t, reply.Success)
+					assert.Equal(t, scenario.total, reply.Data.Total)
+					assert.Equal(t, scenario.online, reply.Data.Online)
+					assert.Len(t, reply.Data.Buckets, reply.Data.Days)
+					if scenario.total == 0 {
+						assert.Nil(t, reply.Data.AverageTTFTMs)
+						assert.Empty(t, reply.Data.Recent)
+					}
+					if scenario.total == 6 {
+						require.NotNil(t, reply.Data.AverageTTFTMs)
+						assert.Equal(t, float64(100), *reply.Data.AverageTTFTMs)
+						assert.EqualValues(t, 2, reply.Data.Errors)
+						assert.EqualValues(t, 1, reply.Data.Degraded)
+						assert.Len(t, reply.Data.Recent, 6)
+						assert.EqualValues(t, 1, reply.Data.Unknown)
+						assert.Equal(t, "unknown", reply.Data.Recent[1].State)
+						assert.Equal(t, "Channel 7", reply.Data.Recent[0].ChannelName)
+						for _, bucket := range reply.Data.Buckets {
+							if bucket.Total == 0 {
+								assert.Nil(t, bucket.AverageTTFTMs)
+							}
+						}
+					}
+				}
+				for _, change := range []struct {
+					column          string
+					value, original any
+				}{
+					{"instance_id", "replacement-instance", *source.InstanceID},
+					{"provider_id", 102, 101},
+					{"status", common.ChannelStatusManuallyDisabled, common.ChannelStatusEnabled},
+				} {
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 1).Update(change.column, change.value).Error)
+					history, err := model.ListPublicProviderHistory(context.Background(), model.PublicHistoryQuery{ProviderID: 101, Days: 7}, time.Now(), model.NewRelationalEvaluationHistoryStore(db))
+					require.NoError(t, err)
+					assert.EqualValues(t, 1, history.Total, "changed/private channel identity must not publish its old history")
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", 1).Update(change.column, change.original).Error)
+				}
+				for _, path := range []string{"/api/public/providers/abc/history", "/api/public/providers/101/history?days=1000", "/api/public/providers/101/history?days=7&days=30", "/api/public/providers/101/history?channel_id=-1", "/api/public/providers/101/history?model=", "/api/public/providers/101/history?model=a%2Cb", "/api/public/providers/101/history?is_online=true", "/api/public/providers/101/history?fields=key"} {
+					recorder := httptest.NewRecorder()
+					engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+					assert.Equal(t, http.StatusBadRequest, recorder.Code, path)
+				}
+			})
+
 			t.Run("invalid and private query inputs are rejected", func(t *testing.T) {
 				for _, path := range []string{
 					"/api/public/channels?sort_by=upstream_ratio", "/api/public/channels?sort_by=key",
@@ -406,15 +530,24 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 
 			t.Run("storage errors never expose database details", func(t *testing.T) {
 				name := "public_catalog_failure"
-				require.NoError(t, db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+				failure := func(tx *gorm.DB) {
 					tx.AddError(errors.New("private-key-canary upstream_ratio=92837.625 private.example"))
-				}))
-				defer func() { require.NoError(t, db.Callback().Query().Remove(name)) }()
-				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels"} {
+				}
+				require.NoError(t, db.Callback().Query().Before("gorm:query").Register(name, failure))
+				require.NoError(t, db.Callback().Row().Before("gorm:row").Register(name, failure))
+				defer func() {
+					require.NoError(t, db.Callback().Query().Remove(name))
+					require.NoError(t, db.Callback().Row().Remove(name))
+				}()
+				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels", "/api/public/providers/101/history"} {
 					recorder, reply := requestPublicCatalog(t, engine, path)
 					assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 					assert.False(t, reply.Success)
-					assert.Equal(t, "public catalog is temporarily unavailable", reply.Message)
+					if strings.HasSuffix(path, "/history") {
+						assert.Equal(t, "evaluation history is temporarily unavailable", reply.Message)
+					} else {
+						assert.Equal(t, "public catalog is temporarily unavailable", reply.Message)
+					}
 				}
 			})
 		})

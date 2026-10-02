@@ -201,44 +201,30 @@ func runChannelDegradationBatch(ctx context.Context, taskID, runnerID string, af
 			targets = append(targets, target)
 		}
 	}
-	observations, err := probeDegradationTargets(ctx, targets, config.Concurrency, func() bool { return common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) })
-	if err != nil {
-		return result, err
-	}
+	observations, probeErr := probeDegradationTargets(ctx, targets, config.Concurrency, func() bool { return common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) })
 	for i, id := range ids {
-		if ctx.Err() != nil {
-			return result, ctx.Err()
-		}
-		if !common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) {
-			return result, errors.New("degradation task disabled")
-		}
 		channel, publicModel, skip := channels[i], names[i], skips[i]
 		if skip != "" {
 			result.Skipped++
 			result.SkipReasons[skip]++
 		} else {
 			target, observation := targets[indices[i]], observations[indices[i]]
-			if ctx.Err() != nil {
-				return result, ctx.Err()
+			if observation.ID == "" {
+				continue // Never dispatched: there is no evaluation to invent.
+			}
+			historyOnly := probeErr != nil || !common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false)
+			sample, writeErr := recordDegradationObservation(ctx, &channel, publicModel, target, observation, taskID, runnerID, historyOnly)
+			if writeErr != nil {
+				probeErr = errors.Join(probeErr, writeErr)
+			}
+			if sample.SnapshotApplied {
+				result.SnapshotApplied++
 			}
 			switch observation.ErrorCode {
 			case "invalid_target", "invalid_format", "invalid_proxy", "invalid_request":
 				result.Skipped++
 				result.SkipReasons[observation.ErrorCode]++
 			default:
-				sample := model.ChannelDegradationSample{
-					ID: observation.ID, TaskID: taskID, Model: publicModel, UpstreamModel: target.Model,
-					RuleVersion: observation.RuleVersion, State: observation.State, MatchedMarker: observation.MatchedMarker,
-					Protocol: target.Format, OutputTokenLimit: degradationOutputTokens, TimeoutMs: target.Timeout.Milliseconds(),
-					ErrorCode: observation.ErrorCode, HTTPStatus: observation.HTTPStatus,
-					StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs, TTFTMs: observation.TTFTMs,
-				}
-				if err := model.RecordChannelDegradation(ctx, &channel, &sample, runnerID); err != nil {
-					return result, err
-				}
-				if sample.SnapshotApplied {
-					result.SnapshotApplied++
-				}
 				switch observation.State {
 				case "normal":
 					result.Normal++
@@ -249,12 +235,17 @@ func runChannelDegradationBatch(ctx context.Context, taskID, runnerID string, af
 				}
 			}
 		}
-		result.Cursor, result.Processed = id, result.Processed+1
-		if progress != nil {
-			progress(result.Processed, len(ids))
+		if probeErr == nil && ctx.Err() == nil && common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) {
+			result.Cursor, result.Processed = id, result.Processed+1
+			if progress != nil {
+				progress(result.Processed, len(ids))
+			}
 		}
 	}
-	return result, nil
+	if !common.GetEnvOrDefaultBool("DEGRADATION_CHECK_ENABLED", false) {
+		probeErr = errors.Join(probeErr, errors.New("degradation task disabled"))
+	}
+	return result, errors.Join(probeErr, ctx.Err())
 }
 
 // An image-generation endpoint cannot answer the text-only refusal prompt.

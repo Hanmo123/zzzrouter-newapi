@@ -43,9 +43,9 @@ func InitializeChannelInstances(db *gorm.DB) error {
 // It contains no API key, endpoint URL, raw response, prompt overrides or costs.
 type ChannelDegradationSample struct {
 	ID                string `json:"id" gorm:"size:36;primaryKey"`
-	ChannelInstanceID string `json:"channel_instance_id" gorm:"size:36;index"`
+	ChannelInstanceID string `json:"channel_instance_id" gorm:"size:36;index;index:idx_evaluation_instance_time,priority:1"`
 	ChannelID         int    `json:"channel_id" gorm:"index"`
-	ProviderID        int    `json:"provider_id"`
+	ProviderID        int    `json:"provider_id" gorm:"index:idx_evaluation_provider_time,priority:1"`
 	ChannelType       int    `json:"channel_type"`
 	Model             string `json:"model" gorm:"size:255"`
 	UpstreamModel     string `json:"upstream_model" gorm:"size:255"`
@@ -58,7 +58,7 @@ type ChannelDegradationSample struct {
 	MatchedMarker     string `json:"matched_marker" gorm:"size:64"`
 	ErrorCode         string `json:"error_code" gorm:"size:64"`
 	HTTPStatus        int    `json:"http_status"`
-	StartedAt         int64  `json:"started_at" gorm:"type:bigint;index"` // Unix milliseconds
+	StartedAt         int64  `json:"started_at" gorm:"type:bigint;index;index:idx_evaluation_instance_time,priority:2;index:idx_evaluation_provider_time,priority:2"` // Unix milliseconds
 	CompletedAt       int64  `json:"completed_at" gorm:"type:bigint"`
 	DurationMs        int64  `json:"duration_ms" gorm:"type:bigint"` // total duration, NOT TTFT
 	TTFTMs            *int64 `json:"ttft_ms" gorm:"type:bigint"`
@@ -91,11 +91,7 @@ func channelDegradationInputs(channel *Channel) []any {
 		channel.IsOnline, channel.IsDegraded, channel.LastCheckedAt, channel.TTFTMs}
 }
 
-// RecordChannelDegradation keeps the result even when the channel was deleted,
-// replaced or edited during the network request. Only an unchanged instance
-// receives the latest snapshot. Successful streams also publish measured TTFT;
-// errors never replace the last successful latency. Routing state is unchanged.
-func RecordChannelDegradation(ctx context.Context, source *Channel, sample *ChannelDegradationSample, runnerID string, historyOnly ...bool) error {
+func prepareChannelDegradationSample(source *Channel, sample *ChannelDegradationSample) error {
 	if source.Id <= 0 || source.InstanceID == nil || *source.InstanceID == "" {
 		return errors.New("channel instance is unavailable")
 	}
@@ -110,6 +106,26 @@ func RecordChannelDegradation(ctx context.Context, source *Channel, sample *Chan
 	}
 	sample.ChannelInstanceID, sample.ChannelID, sample.ProviderID, sample.ChannelType = *source.InstanceID, source.Id, source.ProviderID, source.Type
 	sample.SnapshotApplied = false
+	return nil
+}
+
+// AppendChannelDegradationHistory retains actual finished attempts after a task
+// is cancelled or loses its lease. It cannot update snapshots or task progress.
+func AppendChannelDegradationHistory(ctx context.Context, source *Channel, sample *ChannelDegradationSample) error {
+	if err := prepareChannelDegradationSample(source, sample); err != nil {
+		return err
+	}
+	return NewRelationalEvaluationHistoryStore(DB).Append(ctx, sample)
+}
+
+// RecordChannelDegradation keeps the result even when the channel was deleted,
+// replaced or edited during the network request. Only an unchanged instance
+// receives the latest snapshot. Successful streams also publish measured TTFT;
+// errors never replace the last successful latency. Routing state is unchanged.
+func RecordChannelDegradation(ctx context.Context, source *Channel, sample *ChannelDegradationSample, runnerID string, historyOnly ...bool) error {
+	if err := prepareChannelDegradationSample(source, sample); err != nil {
+		return err
+	}
 	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if sample.TaskID != "" {
 			// Check the lease in the write transaction as well as honoring ctx:
@@ -129,6 +145,12 @@ func RecordChannelDegradation(ctx context.Context, source *Channel, sample *Chan
 			return err
 		}
 		unchanged := err == nil && current.Status == common.ChannelStatusEnabled && !current.SkipDegradationCheck && reflect.DeepEqual(channelDegradationInputs(source), channelDegradationInputs(&current))
+		switch sample.ErrorCode {
+		case "cancelled", "invalid_target", "invalid_format", "invalid_proxy", "invalid_request":
+			// Retain the attempt, but client/configuration failures cannot publish
+			// an offline snapshot as if an upstream measurement had failed.
+			unchanged = false
+		}
 		if unchanged && !(len(historyOnly) > 0 && historyOnly[0]) && (current.LastCheckedAt == nil || *current.LastCheckedAt <= sample.StartedAt/1000) {
 			var degraded *bool
 			online := sample.State != "error"
@@ -147,6 +169,6 @@ func RecordChannelDegradation(ctx context.Context, source *Channel, sample *Chan
 		}
 		// Insert and snapshot update commit together; a duplicate sample UUID
 		// rolls the transaction back instead of rewriting historical results.
-		return tx.Create(sample).Error
+		return NewRelationalEvaluationHistoryStore(tx).Append(ctx, sample)
 	})
 }

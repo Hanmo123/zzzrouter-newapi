@@ -42,6 +42,7 @@ func registerPublicCatalogRoutes(apiRouter *gin.RouterGroup) {
 	catalog := apiRouter.Group("/public", middleware.DisableCache())
 	catalog.GET("/providers", controller.ListPublicProviders)
 	catalog.GET("/providers/:id/channels", controller.ListPublicChannels)
+	catalog.GET("/providers/:id/history", controller.GetPublicProviderHistory)
 	catalog.GET("/channels", controller.ListPublicChannels)
 	catalog.GET("/models", controller.ListPublicModels)
 }

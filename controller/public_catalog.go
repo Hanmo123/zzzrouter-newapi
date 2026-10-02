@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -117,6 +118,56 @@ func ListPublicModels(c *gin.Context) {
 		DefaultModel:   board.DefaultModel,
 		HomepageModels: board.Models,
 	})
+}
+
+func GetPublicProviderHistory(c *gin.Context) {
+	query := model.PublicHistoryQuery{}
+	var err error
+	query.ProviderID, err = strconv.Atoi(c.Param("id"))
+	if err != nil || query.ProviderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid provider ID"})
+		return
+	}
+	parameters, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid query string"})
+		return
+	}
+	for key, values := range parameters {
+		if len(values) != 1 || values[0] == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "query parameters must have one non-empty value"})
+			return
+		}
+		switch key {
+		case "days", "channel_id":
+			value, parseErr := strconv.Atoi(values[0])
+			if parseErr != nil || value <= 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid days or channel ID"})
+				return
+			}
+			if key == "days" {
+				query.Days = value
+			} else {
+				query.ChannelID = value
+			}
+		case "model":
+			query.Model = values[0]
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "unsupported query parameter"})
+			return
+		}
+	}
+	if err := query.Normalize(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	history, err := model.ListPublicProviderHistory(c.Request.Context(), query, time.Now(), model.NewRelationalEvaluationHistoryStore(model.DB))
+	if err != nil {
+		common.SysError("failed to read public evaluation history: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "evaluation history is temporarily unavailable"})
+		return
+	}
+	common.ApiSuccess(c, history)
 }
 
 func ListPublicProviders(c *gin.Context) {

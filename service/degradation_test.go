@@ -496,6 +496,55 @@ func TestDegradationTaskConfiguration(t *testing.T) {
 	}
 }
 
+func TestInterruptedDegradationObservationsRemainDurable(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "interrupted.db")), &gorm.Config{})
+	require.NoError(t, err)
+	previous := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = previous
+		pool, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, pool.Close())
+	})
+	require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}, &model.SystemTaskLock{}))
+	channel := model.Channel{Name: "interrupted", ProviderID: 1, Models: "model-a", Key: "private-key"}
+	require.NoError(t, db.Create(&channel).Error)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, scenario := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+	}{{"cancelled after completion", cancelled, context.Canceled}, {"lost task lease", context.Background(), model.ErrSystemTaskLockLost}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			latency := int64(50)
+			observation := DegradationResult{ID: uuid.NewString(), State: "normal", StartedAt: time.Now().UnixMilli() - 100, CompletedAt: time.Now().UnixMilli(), DurationMs: 100, TTFTMs: &latency}
+			sample, err := recordDegradationObservation(scenario.ctx, &channel, "model-a", DegradationTarget{Format: "chat", Timeout: time.Second}, observation, "expired-task", "runner", false)
+			assert.ErrorIs(t, err, scenario.err)
+			assert.False(t, sample.SnapshotApplied)
+			var persisted model.ChannelDegradationSample
+			require.NoError(t, db.First(&persisted, "id = ?", observation.ID).Error)
+			assert.Equal(t, "normal", persisted.State, "a completed success must not be lost or reclassified by later cancellation")
+			require.NotNil(t, persisted.TTFTMs)
+			assert.EqualValues(t, 50, *persisted.TTFTMs)
+			var current model.Channel
+			require.NoError(t, db.First(&current, channel.Id).Error)
+			assert.Nil(t, current.LastCheckedAt)
+			assert.Nil(t, current.IsOnline)
+		})
+	}
+	for _, code := range []string{"cancelled", "invalid_target", "invalid_format", "invalid_proxy", "invalid_request"} {
+		sample := model.ChannelDegradationSample{ID: uuid.NewString(), State: "error", ErrorCode: code, Model: "model-a", StartedAt: time.Now().UnixMilli(), CompletedAt: time.Now().UnixMilli()}
+		require.NoError(t, model.RecordChannelDegradation(context.Background(), &channel, &sample, ""))
+		assert.False(t, sample.SnapshotApplied, "inconclusive attempts cannot mark a channel offline")
+	}
+	var current model.Channel
+	require.NoError(t, db.First(&current, channel.Id).Error)
+	assert.Nil(t, current.IsOnline)
+	assert.Nil(t, current.LastCheckedAt)
+}
+
 func TestDegradationConcurrentExecution(t *testing.T) {
 	for _, scenario := range []struct {
 		name, env              string
@@ -506,7 +555,8 @@ func TestDegradationConcurrentExecution(t *testing.T) {
 		{name: "CLI configured with timer disabled", env: "4", limit: 4, total: 10},
 		{name: "scheduled configured", env: "3", scheduled: true, limit: 3, total: 5},
 		{name: "CLI flag overrides environment", env: "3", override: 2, limit: 2, total: 10},
-		{name: "CLI cancellation", cancel: true, limit: 8},
+		{name: "CLI cancellation", cancel: true, limit: 8, total: 8},
+		{name: "scheduled cancellation", env: "3", scheduled: true, cancel: true, limit: 3, total: 3},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "concurrent.db")), &gorm.Config{})
@@ -604,7 +654,7 @@ func TestDegradationConcurrentExecution(t *testing.T) {
 			}
 			<-done
 			assert.EqualValues(t, scenario.limit, peak.Load())
-			if scenario.cancel {
+			if scenario.cancel && !scenario.scheduled {
 				assert.Equal(t, 2, exit)
 			} else if !scenario.scheduled {
 				assert.Zero(t, exit, stderr.String())
@@ -612,13 +662,26 @@ func TestDegradationConcurrentExecution(t *testing.T) {
 			if scenario.scheduled {
 				finished, err := model.GetSystemTaskByTaskID(task.TaskID)
 				require.NoError(t, err)
-				assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+				if scenario.cancel {
+					assert.Equal(t, model.SystemTaskStatusFailed, finished.Status)
+				} else {
+					assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+				}
 			}
 			var samples, latencies int64
 			require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Count(&samples).Error)
 			assert.EqualValues(t, scenario.total, samples)
 			require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Where("ttft_ms IS NOT NULL").Count(&latencies).Error)
-			assert.Equal(t, samples, latencies)
+			if scenario.cancel {
+				assert.Zero(t, latencies)
+				var cancelled int64
+				require.NoError(t, db.Model(&model.ChannelDegradationSample{}).Where("error_code = ? AND snapshot_applied = ?", "cancelled", false).Count(&cancelled).Error)
+				assert.Equal(t, samples, cancelled, "every started attempt is durable without publishing an offline snapshot")
+				require.NoError(t, db.Model(&model.Channel{}).Where("last_checked_at IS NOT NULL").Count(&latencies).Error)
+				assert.Zero(t, latencies)
+			} else {
+				assert.Equal(t, samples, latencies)
+			}
 			if !scenario.cancel {
 				require.NoError(t, db.Model(&model.Channel{}).Where("ttft_ms IS NOT NULL").Count(&latencies).Error)
 				assert.EqualValues(t, 5, latencies)

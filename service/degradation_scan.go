@@ -242,10 +242,7 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				}
 			}
 		}
-		observations, err := probeDegradationTargets(ctx, targets, options.Config.Concurrency, nil)
-		if err != nil {
-			return summary, err
-		}
+		observations, probeErr := probeDegradationTargets(ctx, targets, options.Config.Concurrency, nil)
 		for _, channel := range channels {
 			cursor = channel.Id
 			names := make([]string, 0)
@@ -268,9 +265,6 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 			startedAt, completedAt := pageStartedAt, int64(0)
 			var ttft *int64
 			for _, name := range names {
-				if ctx.Err() != nil {
-					return summary, ctx.Err()
-				}
 				summary.Targets++
 				event := degradationScanEvent{Kind: "result", TaskID: taskID, ProviderID: channel.ProviderID, ChannelID: channel.Id, Model: name}
 				target, _, skip := channelDegradationTarget(&channel, options.Config, name, policy.Enabled)
@@ -288,23 +282,17 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 					event.State = "selected"
 				default:
 					observation := observations[indices[channel.Id][name]]
+					if observation.ID == "" {
+						summary.Targets--
+						continue // Not dispatched; retain gaps rather than inventing results.
+					}
 					if observation.State != "error" && observation.TTFTMs != nil && (ttft == nil || *observation.TTFTMs > *ttft) {
 						value := *observation.TTFTMs
 						ttft = &value
 					}
-					if ctx.Err() != nil {
-						return summary, ctx.Err()
-					}
 					event.State, event.Observation = observation.State, &observation
-					sample := model.ChannelDegradationSample{
-						ID: observation.ID, TaskID: taskID, Model: name, UpstreamModel: target.Model,
-						RuleVersion: observation.RuleVersion, State: observation.State, MatchedMarker: observation.MatchedMarker,
-						Protocol: target.Format, OutputTokenLimit: degradationOutputTokens, TimeoutMs: target.Timeout.Milliseconds(),
-						ErrorCode: observation.ErrorCode, HTTPStatus: observation.HTTPStatus,
-						StartedAt: observation.StartedAt, CompletedAt: observation.CompletedAt, DurationMs: observation.DurationMs, TTFTMs: observation.TTFTMs,
-					}
-					if err := model.RecordChannelDegradation(ctx, &channel, &sample, runnerID, true); err != nil {
-						return summary, err
+					if _, writeErr := recordDegradationObservation(ctx, &channel, name, target, observation, taskID, runnerID, true); writeErr != nil {
+						probeErr = errors.Join(probeErr, writeErr)
 					}
 					completedAt = max(completedAt, observation.CompletedAt)
 					switch observation.State {
@@ -321,16 +309,17 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				}
 				encoded, err := common.Marshal(event)
 				if err != nil {
-					return summary, err
+					probeErr = errors.Join(probeErr, err)
+					continue
 				}
 				if _, err := fmt.Fprintln(output, string(encoded)); err != nil {
-					return summary, err
+					probeErr = errors.Join(probeErr, err)
 				}
 			}
 			// No last-model-wins: only a complete, unfiltered channel evaluation may
 			// publish an aggregate. Any abnormal model wins over normal models; errors
 			// without an abnormal verdict remain unknown. Skips preserve the old snapshot.
-			if !options.DryRun && channel.Status == common.ChannelStatusEnabled && len(options.Models) == 0 && skipped == 0 && completedAt > 0 {
+			if probeErr == nil && ctx.Err() == nil && !options.DryRun && channel.Status == common.ChannelStatusEnabled && len(options.Models) == 0 && skipped == 0 && completedAt > 0 {
 				var degraded *bool
 				if abnormal > 0 || failed == 0 {
 					value := abnormal > 0
@@ -338,12 +327,15 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				}
 				applied, err := model.ApplyDegradationScanSummary(ctx, &channel, taskID, runnerID, startedAt, completedAt, degraded, normal+abnormal > 0, ttft)
 				if err != nil {
-					return summary, err
+					probeErr = errors.Join(probeErr, err)
 				}
 				if applied {
 					summary.SnapshotApplied++
 				}
 			}
+		}
+		if probeErr != nil || ctx.Err() != nil {
+			return summary, errors.Join(probeErr, ctx.Err())
 		}
 	}
 }
