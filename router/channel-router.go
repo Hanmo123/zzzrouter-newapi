@@ -45,6 +45,7 @@ func registerPublicCatalogRoutes(apiRouter *gin.RouterGroup) {
 	catalog.GET("/providers/:id/history", controller.GetPublicProviderHistory)
 	catalog.GET("/channels", controller.ListPublicChannels)
 	catalog.GET("/models", controller.ListPublicModels)
+	catalog.GET("/usage/daily", controller.GetPublicDailyUsage)
 }
 
 func registerProviderRoutes(apiRouter *gin.RouterGroup) {

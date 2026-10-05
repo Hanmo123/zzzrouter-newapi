@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
@@ -92,7 +93,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			model.DB = db
 			common.SetMainDatabaseType(common.DatabaseType(dialect))
 			t.Cleanup(func() {
-				require.NoError(t, db.Migrator().DropTable(&model.ChannelDegradationSample{}, &model.Channel{}, &model.Provider{}))
+				require.NoError(t, db.Migrator().DropTable(&model.PublicDailyUsage{}, &model.AuditLog{}, &model.User{}, &model.ChannelDegradationSample{}, &model.Channel{}, &model.Provider{}))
 				model.DB = previousDB
 				common.SetMainDatabaseType(previousType)
 				require.NoError(t, sqlDB.Close())
@@ -104,7 +105,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			}
 			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 			t.Logf("database version: %s", version)
-			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}))
+			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}, &model.PublicDailyUsage{}, &model.User{}, &model.AuditLog{}))
 			providers := []model.Provider{
 				{ID: 101, Code: "private-code-a", Name: "Provider A", Description: "private-provider-description"},
 				{ID: 102, Code: "private-code-b", Name: "Provider B", Description: "private-provider-description"},
@@ -497,6 +498,122 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				}
 			})
 
+			t.Run("manual daily usage is root-managed, portable and excludes today from public reads", func(t *testing.T) {
+				previousLogDB, previousRedis := model.LOG_DB, common.RedisEnabled
+				model.LOG_DB, common.RedisEnabled = db, false
+				defer func() { model.LOG_DB, common.RedisEnabled = previousLogDB, previousRedis }()
+				for i, role := range []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser} {
+					token := fmt.Sprintf("daily-usage-test-%d", i)
+					require.NoError(t, db.Create(&model.User{Id: 91 + i, Username: fmt.Sprintf("private-usage-editor-%d", i), AffCode: fmt.Sprintf("usage%d", i), Role: role, Status: common.UserStatusEnabled, AccessToken: &token}).Error)
+				}
+				registerDailyUsageManagementRoutes(engine.Group("/api/option", middleware.RootAuth()))
+				now := time.Now().UTC()
+				today, yesterday := now.Format("2006-01-02"), now.AddDate(0, 0, -1).Format("2006-01-02")
+				dayBefore := now.AddDate(0, 0, -2).Format("2006-01-02")
+				body := fmt.Sprintf(`{"items":[{"date":%q,"request_count":123},{"date":%q,"request_count":0},{"date":%q,"request_count":999}],"updated_by":91}`, yesterday, dayBefore, today)
+				request := func(method, path, body, token string) *httptest.ResponseRecorder {
+					recorder := httptest.NewRecorder()
+					req := httptest.NewRequest(method, path, strings.NewReader(body))
+					if token != "" {
+						req.Header.Set("Authorization", "Bearer "+token)
+					}
+					req.Header.Set("Content-Type", "application/json")
+					engine.ServeHTTP(recorder, req)
+					return recorder
+				}
+				for _, operation := range []struct{ method, path string }{
+					{http.MethodGet, "/api/option/daily_usage"},
+					{http.MethodPut, "/api/option/daily_usage"},
+					{http.MethodDelete, "/api/option/daily_usage/" + yesterday},
+				} {
+					for _, token := range []string{"", "daily-usage-test-0", "daily-usage-test-1"} {
+						want := http.StatusForbidden
+						if token == "" {
+							want = http.StatusUnauthorized
+						}
+						assert.Equal(t, want, request(operation.method, operation.path, body, token).Code)
+					}
+				}
+				root := "daily-usage-test-2"
+				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", body, root).Code)
+				var stored model.PublicDailyUsage
+				require.NoError(t, db.First(&stored, "day = ?", yesterday).Error)
+				assert.Equal(t, 93, stored.UpdatedBy, "client metadata cannot forge the editor")
+				for range 2 {
+					require.NoError(t, db.AutoMigrate(&model.PublicDailyUsage{}))
+				}
+				var rows int64
+				require.NoError(t, db.Model(&model.PublicDailyUsage{}).Count(&rows).Error)
+				assert.EqualValues(t, 3, rows, "repeated migrations preserve unique dates and stored zeroes")
+				for _, scenario := range []struct {
+					path     string
+					total    int64
+					recorded int
+					last     string
+				}{
+					{"/api/public/usage/daily?days=7", 123, 2, yesterday},
+					{"/api/option/daily_usage?days=7", 1122, 3, today},
+				} {
+					recorder := request(http.MethodGet, scenario.path, "", root)
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					var reply struct {
+						Success bool                         `json:"success"`
+						Data    model.PublicDailyUsageSeries `json:"data"`
+					}
+					require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply))
+					assert.Equal(t, scenario.total, reply.Data.Total)
+					assert.Equal(t, scenario.recorded, reply.Data.RecordedDays)
+					assert.Equal(t, scenario.last, reply.Data.To)
+					assert.Len(t, reply.Data.Items, 7)
+					assert.Nil(t, reply.Data.Items[0].RequestCount)
+					assert.NotContains(t, recorder.Body.String(), "updated_by")
+					assert.NotContains(t, recorder.Body.String(), "private-usage-editor")
+				}
+				// Correction is an upsert, not a duplicate or an additive increment.
+				correction := fmt.Sprintf(`{"items":[{"date":%q,"request_count":7}]}`, yesterday)
+				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", correction, root).Code)
+				for _, invalid := range []string{
+					`{"items":[]}`, `{"items":[{"date":"bad","request_count":1}]}`,
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":-1}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1.5}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":null}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1000000000001}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":10},{"date":"2999-01-01","request_count":1}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1},{"date":%q,"request_count":2}]}`, yesterday, yesterday),
+					correction + correction,
+				} {
+					assert.Equal(t, http.StatusBadRequest, request(http.MethodPut, "/api/option/daily_usage", invalid, root).Code, invalid)
+				}
+				require.NoError(t, db.First(&stored, "day = ?", yesterday).Error)
+				assert.EqualValues(t, 7, stored.RequestCount, "invalid batches leave existing data untouched")
+				for _, suffix := range []string{"?days=366", "?days=7&days=30", "?days=", "?include_today=true", "?model=x", "?fields=updated_by"} {
+					assert.Equal(t, http.StatusBadRequest, request(http.MethodGet, "/api/public/usage/daily"+suffix, "", "").Code)
+				}
+				assert.Equal(t, http.StatusNotFound, request(http.MethodPut, "/api/public/usage/daily", correction, root).Code)
+				assert.Equal(t, http.StatusOK, request(http.MethodDelete, "/api/option/daily_usage/"+yesterday, "", root).Code)
+				assert.Equal(t, http.StatusNotFound, request(http.MethodDelete, "/api/option/daily_usage/"+yesterday, "", root).Code)
+				series, err := model.ListPublicDailyUsage(context.Background(), 7, false, now)
+				require.NoError(t, err)
+				assert.Nil(t, series.Items[6].RequestCount, "deletion restores missing, not a fabricated zero")
+				require.NotNil(t, series.Items[5].RequestCount)
+				assert.EqualValues(t, 0, *series.Items[5].RequestCount)
+				// Today's manually stored value becomes public on the next UTC day.
+				next, err := model.ListPublicDailyUsage(context.Background(), 7, false, now.AddDate(0, 0, 1))
+				require.NoError(t, err)
+				assert.EqualValues(t, 999, *next.Items[6].RequestCount)
+				maximum := model.MaxPublicDailyUsageCount
+				batch := make([]model.DailyUsageInput, 0, 366)
+				for i := range 366 {
+					batch = append(batch, model.DailyUsageInput{Date: now.AddDate(0, 0, -i).Format("2006-01-02"), RequestCount: &maximum})
+				}
+				require.NoError(t, model.SetPublicDailyUsage(context.Background(), batch, 93, now))
+				year, err := model.ListPublicDailyUsage(context.Background(), 365, false, now)
+				require.NoError(t, err)
+				assert.EqualValues(t, 365000000000000, year.Total, "full batches remain portable and JSON-integer-safe")
+				assert.Equal(t, 365, year.RecordedDays)
+				assert.ErrorIs(t, model.SetPublicDailyUsage(context.Background(), append(batch, batch[0]), 93, now), model.ErrInvalidDailyUsage)
+			})
+
 			t.Run("invalid and private query inputs are rejected", func(t *testing.T) {
 				for _, path := range []string{
 					"/api/public/channels?sort_by=upstream_ratio", "/api/public/channels?sort_by=key",
@@ -539,11 +656,13 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Callback().Query().Remove(name))
 					require.NoError(t, db.Callback().Row().Remove(name))
 				}()
-				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels", "/api/public/providers/101/history"} {
+				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels", "/api/public/providers/101/history", "/api/public/usage/daily"} {
 					recorder, reply := requestPublicCatalog(t, engine, path)
 					assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 					assert.False(t, reply.Success)
-					if strings.HasSuffix(path, "/history") {
+					if strings.HasSuffix(path, "/usage/daily") {
+						assert.Equal(t, "daily usage is temporarily unavailable", reply.Message)
+					} else if strings.HasSuffix(path, "/history") {
 						assert.Equal(t, "evaluation history is temporarily unavailable", reply.Message)
 					} else {
 						assert.Equal(t, "public catalog is temporarily unavailable", reply.Message)

@@ -338,6 +338,7 @@ func migrateDB() error {
 		&Provider{},
 		&Channel{},
 		&ChannelDegradationSample{},
+		&PublicDailyUsage{},
 		&Token{},
 		&User{},
 		&UserSession{},

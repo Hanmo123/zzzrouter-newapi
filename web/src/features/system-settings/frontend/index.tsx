@@ -46,6 +46,7 @@ import { Textarea } from '@/components/ui/textarea'
 
 import { useSystemOptions } from '../hooks/use-system-options'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { DailyUsageSettings } from './daily-usage-settings'
 
 function boardSchema(t: (key: string) => string) {
   return z
@@ -215,9 +216,15 @@ export function FrontendSettings() {
         <TabsTrigger value='homepage-board'>
           {t('Homepage quality board')}
         </TabsTrigger>
+        <TabsTrigger value='daily-usage'>
+          {t('Daily usage display')}
+        </TabsTrigger>
       </TabsList>
       <TabsContent value='homepage-board' className='pt-4'>
         <HomepageBoardForm key={raw ?? ''} raw={raw} />
+      </TabsContent>
+      <TabsContent value='daily-usage' className='pt-4'>
+        <DailyUsageSettings />
       </TabsContent>
     </Tabs>
   )

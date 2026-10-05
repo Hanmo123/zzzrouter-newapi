@@ -205,6 +205,7 @@ func SetApiRouter(router *gin.Engine) {
 		optionRoute.Use(middleware.RootAuth())
 		{
 			optionRoute.GET("/", controller.GetOptions)
+			registerDailyUsageManagementRoutes(optionRoute)
 			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
 			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
 			optionRoute.PUT("/", controller.UpdateOption)
