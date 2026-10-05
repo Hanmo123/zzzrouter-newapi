@@ -57,7 +57,7 @@ export function DailyUsageForm(props: {
           .string()
           .refine(
             (value) => validUsageDate(value, props.maxDate),
-            t('Choose today or an earlier valid UTC date')
+            t('Choose an ended UTC date')
           ),
         count: z
           .string()
@@ -69,7 +69,7 @@ export function DailyUsageForm(props: {
     ),
     defaultValues: {
       date: props.selected?.date ?? props.maxDate,
-      count: props.selected ? String(props.selected.request_count) : '',
+      count: props.selected ? String(props.selected.token_count) : '',
     },
   })
   return (
@@ -79,7 +79,7 @@ export function DailyUsageForm(props: {
         onSubmit={form.handleSubmit(async (values) => {
           try {
             await props.onSave([
-              { date: values.date, request_count: Number(values.count) },
+              { date: values.date, token_count: Number(values.count) },
             ])
             form.reset({ date: values.date, count: '' })
           } catch {
@@ -111,7 +111,7 @@ export function DailyUsageForm(props: {
           name='count'
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('Request count')}</FormLabel>
+              <FormLabel>{t('Daily token count')}</FormLabel>
               <FormControl>
                 <Input
                   type='number'
@@ -155,7 +155,7 @@ export function DailyUsageCsvForm(props: {
           } catch {
             return false
           }
-        }, t('Enter 1 to 366 unique dates and integer counts as date,request_count')),
+        }, t('Enter 1 to 366 unique dates and integer counts as date,token_count')),
       })
     ),
     defaultValues: { csv: '' },
@@ -182,7 +182,7 @@ export function DailyUsageCsvForm(props: {
               <FormControl>
                 <Textarea
                   rows={8}
-                  placeholder='date,request_count'
+                  placeholder='date,token_count'
                   disabled={props.pending}
                   {...field}
                 />
@@ -193,7 +193,7 @@ export function DailyUsageCsvForm(props: {
         />
         <p className='text-muted-foreground text-sm'>
           {t(
-            'One date,count pair per line. The optional header is date,request_count. The entire batch saves atomically and replaces only its listed dates.'
+            'One date,token_count pair per line. The entire batch saves atomically and replaces only its listed dates.'
           )}
         </p>
         <Button type='submit' disabled={props.pending} className='self-end'>

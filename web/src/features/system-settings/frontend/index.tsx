@@ -211,7 +211,7 @@ export function FrontendSettings() {
   )?.value
 
   let content = (
-    <Tabs defaultValue='homepage-board' className='max-w-3xl'>
+    <Tabs defaultValue='homepage-board' className='max-w-5xl'>
       <TabsList>
         <TabsTrigger value='homepage-board'>
           {t('Homepage quality board')}

@@ -22,9 +22,10 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 export const MAX_DAILY_USAGE_COUNT = 1_000_000_000_000
 export const dailyUsageQueryKey = ['managed-daily-usage'] as const
 
-export type DailyUsageInput = { date: string; request_count: number }
-export type DailyUsagePoint = { date: string; request_count: number | null }
+export type DailyUsageInput = { date: string; token_count: number }
+export type DailyUsagePoint = { date: string; token_count: number | null }
 export type DailyUsageSeries = {
+  unit: 'tokens'
   timezone: 'UTC'
   source: 'manual'
   from: string
@@ -60,7 +61,7 @@ export function parseUsageCsv(raw: string, maxDate: string): DailyUsageInput[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-  if (/^date\s*,\s*request_count$/i.test(lines[0] ?? '')) lines.shift()
+  if (/^date\s*,\s*token_count$/i.test(lines[0] ?? '')) lines.shift()
   if (!lines.length || lines.length > 366) throw new Error('invalid usage CSV')
   const seen = new Set<string>()
   return lines.map((line) => {
@@ -76,7 +77,7 @@ export function parseUsageCsv(raw: string, maxDate: string): DailyUsageInput[] {
       throw new Error('invalid usage CSV')
     }
     seen.add(date)
-    return { date, request_count: Number(count) }
+    return { date, token_count: Number(count) }
   })
 }
 

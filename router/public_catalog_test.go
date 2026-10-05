@@ -510,7 +510,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				now := time.Now().UTC()
 				today, yesterday := now.Format("2006-01-02"), now.AddDate(0, 0, -1).Format("2006-01-02")
 				dayBefore := now.AddDate(0, 0, -2).Format("2006-01-02")
-				body := fmt.Sprintf(`{"items":[{"date":%q,"request_count":123},{"date":%q,"request_count":0},{"date":%q,"request_count":999}],"updated_by":91}`, yesterday, dayBefore, today)
+				body := fmt.Sprintf(`{"items":[{"date":%q,"token_count":123},{"date":%q,"token_count":0},{"date":%q,"token_count":999}],"updated_by":91}`, yesterday, dayBefore, today)
 				request := func(method, path, body, token string) *httptest.ResponseRecorder {
 					recorder := httptest.NewRecorder()
 					req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -534,6 +534,12 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 						assert.Equal(t, want, request(operation.method, operation.path, body, token).Code)
 					}
 				}
+				// A pre-token-version manually entered number uses the same physical
+				// column; upgrades must preserve it, not multiply or erase it.
+				legacyDay := now.AddDate(0, 0, -10).Format("2006-01-02")
+				require.NoError(t, db.Table(db.NamingStrategy.TableName("PublicDailyUsage")).Create(map[string]any{
+					"day": legacyDay, "request_count": 127, "updated_at": now.Unix(), "updated_by": 93,
+				}).Error)
 				root := "daily-usage-test-2"
 				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", body, root).Code)
 				var stored model.PublicDailyUsage
@@ -544,7 +550,17 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				}
 				var rows int64
 				require.NoError(t, db.Model(&model.PublicDailyUsage{}).Count(&rows).Error)
-				assert.EqualValues(t, 3, rows, "repeated migrations preserve unique dates and stored zeroes")
+				assert.EqualValues(t, 4, rows, "repeated migrations preserve unique dates and stored zeroes")
+				legacy, err := model.ListPublicDailyUsage(context.Background(), 30, false, now)
+				require.NoError(t, err)
+				assert.EqualValues(t, 250, legacy.Total)
+				assert.Equal(t, "tokens", legacy.Unit)
+				for _, point := range legacy.Items {
+					if point.Date == legacyDay {
+						require.NotNil(t, point.TokenCount)
+						assert.EqualValues(t, 127, *point.TokenCount, "manual values survive unchanged")
+					}
+				}
 				for _, scenario := range []struct {
 					path     string
 					total    int64
@@ -552,7 +568,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					last     string
 				}{
 					{"/api/public/usage/daily?days=7", 123, 2, yesterday},
-					{"/api/option/daily_usage?days=7", 1122, 3, today},
+					{"/api/option/daily_usage?days=7", 123, 2, yesterday},
 				} {
 					recorder := request(http.MethodGet, scenario.path, "", root)
 					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -565,27 +581,30 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					assert.Equal(t, scenario.recorded, reply.Data.RecordedDays)
 					assert.Equal(t, scenario.last, reply.Data.To)
 					assert.Len(t, reply.Data.Items, 7)
-					assert.Nil(t, reply.Data.Items[0].RequestCount)
+					assert.Nil(t, reply.Data.Items[0].TokenCount)
+					assert.Equal(t, "tokens", reply.Data.Unit)
+					assert.NotContains(t, recorder.Body.String(), "request_count")
 					assert.NotContains(t, recorder.Body.String(), "updated_by")
 					assert.NotContains(t, recorder.Body.String(), "private-usage-editor")
 				}
 				// Correction is an upsert, not a duplicate or an additive increment.
-				correction := fmt.Sprintf(`{"items":[{"date":%q,"request_count":7}]}`, yesterday)
+				correction := fmt.Sprintf(`{"items":[{"date":%q,"token_count":7}]}`, yesterday)
 				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", correction, root).Code)
 				for _, invalid := range []string{
-					`{"items":[]}`, `{"items":[{"date":"bad","request_count":1}]}`,
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":-1}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1.5}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":null}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1000000000001}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":10},{"date":"2999-01-01","request_count":1}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1},{"date":%q,"request_count":2}]}`, yesterday, yesterday),
+					`{"items":[]}`, `{"items":[{"date":"bad","token_count":1}]}`,
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":-1}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1.5}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":null}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1000000000001}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":10},{"date":"2999-01-01","token_count":1}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1},{"date":%q,"token_count":2}]}`, yesterday, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1}]}`, yesterday),
 					correction + correction,
 				} {
 					assert.Equal(t, http.StatusBadRequest, request(http.MethodPut, "/api/option/daily_usage", invalid, root).Code, invalid)
 				}
 				require.NoError(t, db.First(&stored, "day = ?", yesterday).Error)
-				assert.EqualValues(t, 7, stored.RequestCount, "invalid batches leave existing data untouched")
+				assert.EqualValues(t, 7, stored.TokenCount, "invalid batches leave existing data untouched")
 				for _, suffix := range []string{"?days=366", "?days=7&days=30", "?days=", "?include_today=true", "?model=x", "?fields=updated_by"} {
 					assert.Equal(t, http.StatusBadRequest, request(http.MethodGet, "/api/public/usage/daily"+suffix, "", "").Code)
 				}
@@ -594,17 +613,17 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				assert.Equal(t, http.StatusNotFound, request(http.MethodDelete, "/api/option/daily_usage/"+yesterday, "", root).Code)
 				series, err := model.ListPublicDailyUsage(context.Background(), 7, false, now)
 				require.NoError(t, err)
-				assert.Nil(t, series.Items[6].RequestCount, "deletion restores missing, not a fabricated zero")
-				require.NotNil(t, series.Items[5].RequestCount)
-				assert.EqualValues(t, 0, *series.Items[5].RequestCount)
+				assert.Nil(t, series.Items[6].TokenCount, "deletion restores missing, not a fabricated zero")
+				require.NotNil(t, series.Items[5].TokenCount)
+				assert.EqualValues(t, 0, *series.Items[5].TokenCount)
 				// Today's manually stored value becomes public on the next UTC day.
 				next, err := model.ListPublicDailyUsage(context.Background(), 7, false, now.AddDate(0, 0, 1))
 				require.NoError(t, err)
-				assert.EqualValues(t, 999, *next.Items[6].RequestCount)
+				assert.EqualValues(t, 999, *next.Items[6].TokenCount)
 				maximum := model.MaxPublicDailyUsageCount
 				batch := make([]model.DailyUsageInput, 0, 366)
 				for i := range 366 {
-					batch = append(batch, model.DailyUsageInput{Date: now.AddDate(0, 0, -i).Format("2006-01-02"), RequestCount: &maximum})
+					batch = append(batch, model.DailyUsageInput{Date: now.AddDate(0, 0, -i).Format("2006-01-02"), TokenCount: &maximum})
 				}
 				require.NoError(t, model.SetPublicDailyUsage(context.Background(), batch, 93, now))
 				year, err := model.ListPublicDailyUsage(context.Background(), 365, false, now)

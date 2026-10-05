@@ -16,25 +16,28 @@ const MaxPublicDailyUsageBatch = 366
 var ErrInvalidDailyUsage = errors.New("invalid daily usage")
 
 // Manually maintained, platform-wide display data, not consumption logs or
-// billing facts. A correction replaces one day's count without touching quota.
+// billing facts. Values are daily tokens, not request counts. Retain the legacy
+// request_count column and manually entered numbers without unit conversion;
+// no measured request logs are being relabeled or used to infer token usage.
 type PublicDailyUsage struct {
-	Day          string `gorm:"size:10;primaryKey"`
-	RequestCount int64  `gorm:"type:bigint;not null"`
-	UpdatedAt    int64  `gorm:"type:bigint;not null"`
-	UpdatedBy    int    `gorm:"not null"`
+	Day        string `gorm:"size:10;primaryKey"`
+	TokenCount int64  `gorm:"column:request_count;type:bigint;not null"`
+	UpdatedAt  int64  `gorm:"type:bigint;not null"`
+	UpdatedBy  int    `gorm:"not null"`
 }
 
 type DailyUsageInput struct {
-	Date         string `json:"date"`
-	RequestCount *int64 `json:"request_count"`
+	Date       string `json:"date"`
+	TokenCount *int64 `json:"token_count"`
 }
 
 type DailyUsagePoint struct {
-	Date         string `json:"date"`
-	RequestCount *int64 `json:"request_count"`
+	Date       string `json:"date"`
+	TokenCount *int64 `json:"token_count"`
 }
 
 type PublicDailyUsageSeries struct {
+	Unit         string            `json:"unit"`
 	Timezone     string            `json:"timezone"`
 	Source       string            `json:"source"`
 	From         string            `json:"from"`
@@ -65,11 +68,11 @@ func SetPublicDailyUsage(ctx context.Context, items []DailyUsageInput, editorID 
 		if err := ValidateDailyUsageDate(item.Date, now); err != nil {
 			return err
 		}
-		if seen[item.Date] || item.RequestCount == nil || *item.RequestCount < 0 || *item.RequestCount > MaxPublicDailyUsageCount {
+		if seen[item.Date] || item.TokenCount == nil || *item.TokenCount < 0 || *item.TokenCount > MaxPublicDailyUsageCount {
 			return fmt.Errorf("%w: dates must be unique and counts must be integers from 0 to 1000000000000", ErrInvalidDailyUsage)
 		}
 		seen[item.Date] = true
-		records = append(records, PublicDailyUsage{Day: item.Date, RequestCount: *item.RequestCount, UpdatedAt: now.Unix(), UpdatedBy: editorID})
+		records = append(records, PublicDailyUsage{Day: item.Date, TokenCount: *item.TokenCount, UpdatedAt: now.Unix(), UpdatedBy: editorID})
 	}
 	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return tx.Clauses(clause.OnConflict{
@@ -91,27 +94,27 @@ func ListPublicDailyUsage(ctx context.Context, days int, includeToday bool, now 
 	}
 	start := end.AddDate(0, 0, -(days - 1))
 	response := PublicDailyUsageSeries{
-		Timezone: "UTC", Source: "manual", From: start.Format("2006-01-02"), To: end.Format("2006-01-02"), Days: days,
+		Unit: "tokens", Timezone: "UTC", Source: "manual", From: start.Format("2006-01-02"), To: end.Format("2006-01-02"), Days: days,
 		Items: make([]DailyUsagePoint, 0, days),
 	}
 	var rows []struct {
-		Day          string
-		RequestCount int64
+		Day        string
+		TokenCount int64
 	}
-	// Never load editor IDs, users, token usage, revenue or raw request logs.
-	if err := DB.WithContext(ctx).Model(&PublicDailyUsage{}).Select("day, request_count").
+	// Never load editor IDs, users, revenue or raw request logs.
+	if err := DB.WithContext(ctx).Model(&PublicDailyUsage{}).Select("day, request_count AS token_count").
 		Where("day >= ? AND day <= ?", response.From, response.To).Order("day ASC").Scan(&rows).Error; err != nil {
 		return response, err
 	}
 	byDate := make(map[string]int64, len(rows))
 	for _, row := range rows {
-		byDate[row.Day] = row.RequestCount
+		byDate[row.Day] = row.TokenCount
 	}
 	for i := range days {
 		date := start.AddDate(0, 0, i).Format("2006-01-02")
 		point := DailyUsagePoint{Date: date}
 		if count, exists := byDate[date]; exists {
-			point.RequestCount = &count
+			point.TokenCount = &count
 			response.Total += count
 			response.RecordedDays++
 		}

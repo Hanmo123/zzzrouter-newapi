@@ -60,6 +60,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
+import { DailyUsageBarEditor } from './daily-usage-bar-editor'
 import {
   dailyUsageQueryKey,
   deleteDailyUsage,
@@ -74,7 +75,8 @@ export function DailyUsageSettings() {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const queryClient = useQueryClient()
   const [days, setDays] = useState(30)
-  const [mode, setMode] = useState('single')
+  const [chartDirty, setChartDirty] = useState(false)
+  const [mode, setMode] = useState('chart')
   const [editing, setEditing] = useState<DailyUsageInput | null>(null)
   const [editRevision, setEditRevision] = useState(0)
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -86,9 +88,9 @@ export function DailyUsageSettings() {
   })
   const save = useMutation({
     mutationFn: saveDailyUsage,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: dailyUsageQueryKey })
-      toast.success(t('Daily usage saved'))
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: dailyUsageQueryKey })
+      toast.success(t('Token usage saved and published'))
     },
     onError: (error) =>
       handleServerError(error, t('Failed to save daily usage')),
@@ -116,7 +118,7 @@ export function DailyUsageSettings() {
   if (!data.data) return <LoadingState />
   const records = [...data.data.items]
     .reverse()
-    .filter((item) => item.request_count !== null)
+    .filter((item) => item.token_count !== null)
 
   return (
     <Card>
@@ -124,12 +126,12 @@ export function DailyUsageSettings() {
         <CardTitle>{t('Daily usage display')}</CardTitle>
         <CardDescription>
           {t(
-            'Manually maintain platform-wide request counts for the public usage page. This does not alter consumption logs or billing.'
+            'Maintain daily platform token totals. Changes to ended UTC dates are published to the public usage page.'
           )}
         </CardDescription>
         <CardDescription>
           {t(
-            'Dates use UTC. Today can be maintained here but is not yet displayed publicly; it appears after the UTC day ends.'
+            'The editor and public chart share the same dates, ending yesterday (UTC). The current day remains excluded.'
           )}
         </CardDescription>
       </CardHeader>
@@ -142,9 +144,18 @@ export function DailyUsageSettings() {
         )}
         <Tabs value={mode} onValueChange={(value) => setMode(String(value))}>
           <TabsList>
+            <TabsTrigger value='chart'>{t('Drag token bars')}</TabsTrigger>
             <TabsTrigger value='single'>{t('Single date')}</TabsTrigger>
             <TabsTrigger value='csv'>{t('Batch CSV')}</TabsTrigger>
           </TabsList>
+          <TabsContent value='chart' keepMounted className='pt-4'>
+            <DailyUsageBarEditor
+              series={data.data}
+              pending={pending || data.isFetching}
+              onDirtyChange={setChartDirty}
+              onSave={(items) => save.mutateAsync(items)}
+            />
+          </TabsContent>
           <TabsContent value='single' keepMounted className='pt-4'>
             <DailyUsageForm
               key={editRevision}
@@ -170,7 +181,7 @@ export function DailyUsageSettings() {
               onValueChange={(value) => {
                 if (value) setDays(Number(value))
               }}
-              disabled={pending}
+              disabled={pending || chartDirty}
             >
               <SelectTrigger aria-label={t('Daily history range')}>
                 <SelectValue />
@@ -187,7 +198,7 @@ export function DailyUsageSettings() {
             </Select>
             <Button
               variant='outline'
-              disabled={data.isFetching || pending}
+              disabled={data.isFetching || pending || chartDirty}
               onClick={() => void data.refetch()}
             >
               {t('Refresh')}
@@ -202,7 +213,7 @@ export function DailyUsageSettings() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('Usage date (UTC)')}</TableHead>
-                  <TableHead>{t('Request count')}</TableHead>
+                  <TableHead>{t('Daily token count')}</TableHead>
                   <TableHead>{t('Actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -211,7 +222,7 @@ export function DailyUsageSettings() {
                   <TableRow key={record.date}>
                     <TableCell>{record.date}</TableCell>
                     <TableCell>
-                      {formatNumber(record.request_count, locale)}
+                      {formatNumber(record.token_count, locale)}
                     </TableCell>
                     <TableCell>
                       <div className='flex gap-2'>
@@ -225,7 +236,7 @@ export function DailyUsageSettings() {
                           onClick={() => {
                             setEditing({
                               date: record.date,
-                              request_count: record.request_count ?? 0,
+                              token_count: record.token_count ?? 0,
                             })
                             setEditRevision((value) => value + 1)
                             setMode('single')

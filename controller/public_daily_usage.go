@@ -56,7 +56,7 @@ func GetManagedDailyUsage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	data, err := model.ListPublicDailyUsage(c.Request.Context(), days, true, time.Now())
+	data, err := model.ListPublicDailyUsage(c.Request.Context(), days, false, time.Now())
 	if err != nil {
 		common.SysError("could not read managed daily usage: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "daily usage is temporarily unavailable"})
@@ -76,7 +76,7 @@ func SetManagedDailyUsage(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64*1024)
 	body, readErr := io.ReadAll(c.Request.Body)
 	if readErr != nil || common.Unmarshal(body, &request) != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "provide dates and integer request counts"})
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "provide dates and integer token counts"})
 		return
 	}
 	err := model.SetPublicDailyUsage(c.Request.Context(), request.Items, c.GetInt("id"), time.Now())
