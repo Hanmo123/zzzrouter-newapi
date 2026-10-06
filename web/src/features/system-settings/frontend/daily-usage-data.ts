@@ -36,14 +36,13 @@ export type DailyUsageSeries = {
   items: DailyUsagePoint[]
 }
 
-export function validUsageDate(date: string, maxDate: string): boolean {
+export function validUsageDate(date: string): boolean {
   const time = Date.parse(`${date}T00:00:00Z`)
   return (
     /^\d{4}-\d{2}-\d{2}$/.test(date) &&
     Number.isFinite(time) &&
     new Date(time).toISOString().slice(0, 10) === date &&
-    date >= '1970-01-01' &&
-    date <= maxDate
+    date >= '1970-01-01'
   )
 }
 
@@ -55,7 +54,7 @@ export function validUsageCount(value: string): boolean {
   )
 }
 
-export function parseUsageCsv(raw: string, maxDate: string): DailyUsageInput[] {
+export function parseUsageCsv(raw: string): DailyUsageInput[] {
   const lines = raw
     .trim()
     .split(/\r?\n/)
@@ -70,7 +69,7 @@ export function parseUsageCsv(raw: string, maxDate: string): DailyUsageInput[] {
     const count = parts[1] ?? ''
     if (
       parts.length !== 2 ||
-      !validUsageDate(date, maxDate) ||
+      !validUsageDate(date) ||
       !validUsageCount(count) ||
       seen.has(date)
     ) {
@@ -82,11 +81,12 @@ export function parseUsageCsv(raw: string, maxDate: string): DailyUsageInput[] {
 }
 
 export async function getManagedDailyUsage(
-  days: number
+  days: number,
+  to?: string
 ): Promise<DailyUsageSeries> {
   const response = await api.get<{ success: boolean; data: DailyUsageSeries }>(
     '/api/option/daily_usage',
-    { params: { days } }
+    { params: { days, ...(to ? { to } : {}) } }
   )
   return requireServerSuccess(response.data).data
 }

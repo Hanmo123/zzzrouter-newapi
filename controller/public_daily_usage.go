@@ -14,34 +14,48 @@ import (
 	"gorm.io/gorm"
 )
 
-func parseDailyUsageDays(c *gin.Context, defaultDays int) (int, error) {
+func parseDailyUsageQuery(c *gin.Context, defaultDays int, managed bool) (int, time.Time, error) {
 	parameters, err := url.ParseQuery(c.Request.URL.RawQuery)
+	end := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -1)
 	if err != nil {
-		return 0, errors.New("invalid query string")
+		return 0, end, errors.New("invalid query string")
 	}
 	days := defaultDays
 	for key, values := range parameters {
-		if key != "days" || len(values) != 1 || values[0] == "" {
-			return 0, errors.New("only one non-empty days parameter is supported")
+		if len(values) != 1 || values[0] == "" {
+			return 0, end, errors.New("query parameters must be non-empty and unique")
 		}
-		days, err = strconv.Atoi(values[0])
-		if err != nil {
-			return 0, errors.New("invalid days")
+		switch {
+		case key == "days":
+			days, err = strconv.Atoi(values[0])
+			if err != nil {
+				return 0, end, errors.New("invalid days")
+			}
+		case key == "to" && managed:
+			if err := model.ValidateDailyUsageDate(values[0]); err != nil {
+				return 0, end, err
+			}
+			end, err = time.Parse("2006-01-02", values[0])
+			if err != nil {
+				return 0, end, err
+			}
+		default:
+			return 0, end, errors.New("unsupported query parameter")
 		}
 	}
 	if days != 7 && days != 30 && days != 90 && days != 365 {
-		return 0, errors.New("days must be 7, 30, 90 or 365")
+		return 0, end, errors.New("days must be 7, 30, 90 or 365")
 	}
-	return days, nil
+	return days, end, nil
 }
 
 func GetPublicDailyUsage(c *gin.Context) {
-	days, err := parseDailyUsageDays(c, 365)
+	days, end, err := parseDailyUsageQuery(c, 365, false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	data, err := model.ListPublicDailyUsage(c.Request.Context(), days, false, time.Now())
+	data, err := model.ListDailyUsageEnding(c.Request.Context(), days, end)
 	if err != nil {
 		common.SysError("could not read public daily usage: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "daily usage is temporarily unavailable"})
@@ -51,12 +65,12 @@ func GetPublicDailyUsage(c *gin.Context) {
 }
 
 func GetManagedDailyUsage(c *gin.Context) {
-	days, err := parseDailyUsageDays(c, 30)
+	days, end, err := parseDailyUsageQuery(c, 30, true)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	data, err := model.ListPublicDailyUsage(c.Request.Context(), days, false, time.Now())
+	data, err := model.ListDailyUsageEnding(c.Request.Context(), days, end)
 	if err != nil {
 		common.SysError("could not read managed daily usage: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "daily usage is temporarily unavailable"})
@@ -97,7 +111,7 @@ func DeleteManagedDailyUsage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "query parameters are not supported"})
 		return
 	}
-	err := model.DeletePublicDailyUsage(c.Request.Context(), c.Param("day"), time.Now())
+	err := model.DeletePublicDailyUsage(c.Request.Context(), c.Param("day"))
 	switch {
 	case errors.Is(err, model.ErrInvalidDailyUsage):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})

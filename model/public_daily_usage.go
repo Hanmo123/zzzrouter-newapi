@@ -48,10 +48,10 @@ type PublicDailyUsageSeries struct {
 	Items        []DailyUsagePoint `json:"items"`
 }
 
-func ValidateDailyUsageDate(day string, now time.Time) error {
+func ValidateDailyUsageDate(day string) error {
 	date, err := time.Parse("2006-01-02", day)
-	if err != nil || date.Year() < 1970 || date.After(now.UTC().Truncate(24*time.Hour)) {
-		return fmt.Errorf("%w: date must be YYYY-MM-DD between 1970-01-01 and today (UTC)", ErrInvalidDailyUsage)
+	if err != nil || len(day) != 10 || date.Year() < 1970 || date.Format("2006-01-02") != day {
+		return fmt.Errorf("%w: date must be YYYY-MM-DD between 1970-01-01 and 9999-12-31", ErrInvalidDailyUsage)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func SetPublicDailyUsage(ctx context.Context, items []DailyUsageInput, editorID 
 	seen := make(map[string]bool, len(items))
 	records := make([]PublicDailyUsage, 0, len(items))
 	for _, item := range items {
-		if err := ValidateDailyUsageDate(item.Date, now); err != nil {
+		if err := ValidateDailyUsageDate(item.Date); err != nil {
 			return err
 		}
 		if seen[item.Date] || item.TokenCount == nil || *item.TokenCount < 0 || *item.TokenCount > MaxPublicDailyUsageCount {
@@ -82,16 +82,22 @@ func SetPublicDailyUsage(ctx context.Context, items []DailyUsageInput, editorID 
 	})
 }
 
-// includeToday is a server-side policy, not a public query parameter. Root
-// management can maintain today's count; the public page currently ends yesterday.
+// includeToday is a server-side policy, not a public query parameter.
+// Preconfigured future values are published only after their UTC day ends.
 func ListPublicDailyUsage(ctx context.Context, days int, includeToday bool, now time.Time) (PublicDailyUsageSeries, error) {
-	if days != 7 && days != 30 && days != 90 && days != 365 {
-		return PublicDailyUsageSeries{}, fmt.Errorf("%w: days must be 7, 30, 90 or 365", ErrInvalidDailyUsage)
-	}
 	end := now.UTC().Truncate(24 * time.Hour)
 	if !includeToday {
 		end = end.AddDate(0, 0, -1)
 	}
+	return ListDailyUsageEnding(ctx, days, end)
+}
+
+// Explicit range ends are available only through the root management API.
+func ListDailyUsageEnding(ctx context.Context, days int, end time.Time) (PublicDailyUsageSeries, error) {
+	if days != 7 && days != 30 && days != 90 && days != 365 {
+		return PublicDailyUsageSeries{}, fmt.Errorf("%w: days must be 7, 30, 90 or 365", ErrInvalidDailyUsage)
+	}
+	end = end.UTC().Truncate(24 * time.Hour)
 	start := end.AddDate(0, 0, -(days - 1))
 	response := PublicDailyUsageSeries{
 		Unit: "tokens", Timezone: "UTC", Source: "manual", From: start.Format("2006-01-02"), To: end.Format("2006-01-02"), Days: days,
@@ -123,8 +129,8 @@ func ListPublicDailyUsage(ctx context.Context, days int, includeToday bool, now 
 	return response, nil
 }
 
-func DeletePublicDailyUsage(ctx context.Context, day string, now time.Time) error {
-	if err := ValidateDailyUsageDate(day, now); err != nil {
+func DeletePublicDailyUsage(ctx context.Context, day string) error {
+	if err := ValidateDailyUsageDate(day); err != nil {
 		return err
 	}
 	result := DB.WithContext(ctx).Where("day = ?", day).Delete(&PublicDailyUsage{})

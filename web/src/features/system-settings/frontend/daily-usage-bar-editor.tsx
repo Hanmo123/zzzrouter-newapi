@@ -24,8 +24,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Slider } from '@/components/ui/slider'
-import { toIntlLocale } from '@/i18n/languages'
-import { formatCompactNumber, formatNumber } from '@/lib/format'
+import { formatCompactNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import {
@@ -43,8 +42,7 @@ export function DailyUsageBarEditor(props: {
   onDirtyChange: (dirty: boolean) => void
   onSave: (items: DailyUsageInput[]) => Promise<void>
 }) {
-  const { t, i18n } = useTranslation()
-  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const { t } = useTranslation()
   const [drafts, setDrafts] = useState<Record<string, number>>({})
   const [selected, setSelected] = useState(props.series.to)
   const [ceiling, setCeiling] = useState(() =>
@@ -126,7 +124,7 @@ export function DailyUsageBarEditor(props: {
         >
           {[1, 0.75, 0.5, 0.25, 0].map((fraction) => (
             <span key={fraction}>
-              {formatCompactNumber(plotMax * fraction, locale)}
+              {formatCompactNumber(plotMax * fraction, 'en-US')}
             </span>
           ))}
         </div>
@@ -149,7 +147,7 @@ export function DailyUsageBarEditor(props: {
                       min={0}
                       max={plotMax}
                       step={1}
-                      locale={locale}
+                      locale='en-US'
                       value={[value ?? 0]}
                       disabled={props.pending}
                       className={cn(value === null && 'opacity-40')}
@@ -171,7 +169,7 @@ export function DailyUsageBarEditor(props: {
                           Array.isArray(values) ? (values[0] ?? 0) : values
                         )
                       }}
-                      format={{ maximumFractionDigits: 0 }}
+                      format={{ notation: 'compact', maximumFractionDigits: 1 }}
                     />
                   </div>
                   <Button
@@ -189,7 +187,7 @@ export function DailyUsageBarEditor(props: {
                     {point.date.slice(8)}
                   </Button>
                   <span className='text-muted-foreground text-center text-[10px] tabular-nums'>
-                    {value === null ? '—' : formatCompactNumber(value, locale)}
+                    {value === null ? '—' : formatCompactNumber(value, 'en-US')}
                   </span>
                 </div>
               )
@@ -226,7 +224,7 @@ export function DailyUsageBarEditor(props: {
         {t('{{count}} dates changed', { count: dirty.length })} ·{' '}
         {selectedCount === null
           ? t('No Data')
-          : `${formatNumber(selectedCount, locale)} Tokens`}
+          : `${formatCompactNumber(selectedCount, 'en-US')} Tokens`}
       </p>
       <div className='flex flex-wrap justify-end gap-2'>
         <Button

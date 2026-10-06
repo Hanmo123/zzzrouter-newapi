@@ -38,6 +38,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -56,8 +58,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { toIntlLocale } from '@/i18n/languages'
-import { formatNumber } from '@/lib/format'
+import { formatCompactNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { DailyUsageBarEditor } from './daily-usage-bar-editor'
@@ -66,23 +67,24 @@ import {
   deleteDailyUsage,
   getManagedDailyUsage,
   saveDailyUsage,
+  validUsageDate,
   type DailyUsageInput,
 } from './daily-usage-data'
 import { DailyUsageCsvForm, DailyUsageForm } from './daily-usage-form'
 
 export function DailyUsageSettings() {
-  const { t, i18n } = useTranslation()
-  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [days, setDays] = useState(30)
+  const [endDate, setEndDate] = useState('')
   const [chartDirty, setChartDirty] = useState(false)
   const [mode, setMode] = useState('chart')
   const [editing, setEditing] = useState<DailyUsageInput | null>(null)
   const [editRevision, setEditRevision] = useState(0)
   const [deleting, setDeleting] = useState<string | null>(null)
   const data = useQuery({
-    queryKey: [...dailyUsageQueryKey, days],
-    queryFn: () => getManagedDailyUsage(days),
+    queryKey: [...dailyUsageQueryKey, days, endDate],
+    queryFn: () => getManagedDailyUsage(days, endDate),
     placeholderData: keepPreviousData,
     meta: { errorToast: false },
   })
@@ -90,7 +92,7 @@ export function DailyUsageSettings() {
     mutationFn: saveDailyUsage,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: dailyUsageQueryKey })
-      toast.success(t('Token usage saved and published'))
+      toast.success(t('Token usage saved'))
     },
     onError: (error) =>
       handleServerError(error, t('Failed to save daily usage')),
@@ -131,7 +133,7 @@ export function DailyUsageSettings() {
         </CardDescription>
         <CardDescription>
           {t(
-            'The editor and public chart share the same dates, ending yesterday (UTC). The current day remains excluded.'
+            'The range defaults to yesterday (UTC). Future dates can be prepared in advance and become public after that UTC day ends.'
           )}
         </CardDescription>
       </CardHeader>
@@ -159,7 +161,7 @@ export function DailyUsageSettings() {
           <TabsContent value='single' keepMounted className='pt-4'>
             <DailyUsageForm
               key={editRevision}
-              maxDate={data.data.to}
+              defaultDate={data.data.to}
               pending={pending}
               selected={editing}
               onSave={(items) => save.mutateAsync(items)}
@@ -167,7 +169,6 @@ export function DailyUsageSettings() {
           </TabsContent>
           <TabsContent value='csv' keepMounted className='pt-4'>
             <DailyUsageCsvForm
-              maxDate={data.data.to}
               pending={pending}
               onSave={(items) => save.mutateAsync(items)}
             />
@@ -175,7 +176,25 @@ export function DailyUsageSettings() {
         </Tabs>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <h3 className='font-medium'>{t('Daily token data')}</h3>
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-end gap-2'>
+            <FieldGroup className='w-auto'>
+              <Field>
+                <FieldLabel htmlFor='daily-usage-range-end'>
+                  {t('Range end date (UTC)')}
+                </FieldLabel>
+                <Input
+                  id='daily-usage-range-end'
+                  type='date'
+                  min='1970-01-01'
+                  value={endDate || data.data.to}
+                  disabled={pending || chartDirty}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (!value || validUsageDate(value)) setEndDate(value)
+                  }}
+                />
+              </Field>
+            </FieldGroup>
             <Select
               value={String(days)}
               onValueChange={(value) => {
@@ -222,7 +241,7 @@ export function DailyUsageSettings() {
                   <TableRow key={record.date}>
                     <TableCell>{record.date}</TableCell>
                     <TableCell>
-                      {formatNumber(record.token_count, locale)}
+                      {formatCompactNumber(record.token_count, 'en-US')}
                     </TableCell>
                     <TableCell>
                       <div className='flex gap-2'>

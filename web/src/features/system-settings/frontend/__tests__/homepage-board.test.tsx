@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
@@ -52,9 +52,13 @@ afterAll(() => {
 })
 afterEach(() => vi.clearAllMocks())
 
-function renderSettings(raw?: string) {
-  vi.mocked(api.get).mockImplementation(async (url) => {
+function renderSettings(raw?: string, latestTokens = 12) {
+  vi.mocked(api.get).mockImplementation(async (url, options) => {
     if (url === '/api/option/daily_usage') {
+      const to = String(options?.params?.to || '2026-09-30')
+      const end = Date.parse(`${to}T00:00:00Z`)
+      const date = (offset: number) =>
+        new Date(end + offset * 86400000).toISOString().slice(0, 10)
       return {
         data: {
           success: true,
@@ -62,15 +66,15 @@ function renderSettings(raw?: string) {
             unit: 'tokens',
             source: 'manual',
             timezone: 'UTC',
-            from: '2026-09-01',
-            to: '2026-09-30',
+            from: date(-29),
+            to,
             days: 30,
-            total: 12,
+            total: latestTokens,
             recorded_days: 2,
             items: [
-              { date: '2026-09-28', token_count: null },
-              { date: '2026-09-29', token_count: 0 },
-              { date: '2026-09-30', token_count: 12 },
+              { date: date(-2), token_count: null },
+              { date: date(-1), token_count: 0 },
+              { date: to, token_count: latestTokens },
             ],
           },
         },
@@ -160,9 +164,10 @@ it.each([
   }
 )
 
-it('CSV validates token integers and ended UTC dates rather than request counts', () => {
+it('CSV accepts future UTC dates but rejects invalid dates and noninteger token counts', () => {
   for (const csv of [
-    '2026-10-01,1',
+    '1969-12-31,1',
+    '10000-01-01,1',
     '2025-02-29,1',
     '2026-09-30,-1',
     '2026-09-30,1.5',
@@ -170,11 +175,14 @@ it('CSV validates token integers and ended UTC dates rather than request counts'
     '2026-09-30,1000000000001',
     'date,request_count\n2026-09-30,1',
   ]) {
-    expect(() => parseUsageCsv(csv, '2026-09-30')).toThrow()
+    expect(() => parseUsageCsv(csv)).toThrow()
   }
-  expect(parseUsageCsv('date,token_count\n2024-02-29,0', '2026-09-30')).toEqual(
-    [{ date: '2024-02-29', token_count: 0 }]
-  )
+  expect(
+    parseUsageCsv('date,token_count\n2024-02-29,0\n2999-01-01,1234')
+  ).toEqual([
+    { date: '2024-02-29', token_count: 0 },
+    { date: '2999-01-01', token_count: 1234 },
+  ])
 })
 
 it('the default token editor exposes daily bars and only saves edited days atomically', async () => {
@@ -227,8 +235,10 @@ it('exact token input updates a bar, supports zero and reset restores the persis
     screen.getByRole('slider', { name: 'Tokens for 2026-09-30' })
   ).toHaveAttribute('aria-valuenow', '0')
   expect(screen.getByLabelText('Daily history range')).toBeDisabled()
+  expect(screen.getByLabelText('Range end date (UTC)')).toBeDisabled()
   await user.click(screen.getByRole('button', { name: 'Reset changes' }))
   expect(screen.getByLabelText('Daily history range')).toBeEnabled()
+  expect(screen.getByLabelText('Range end date (UTC)')).toBeEnabled()
   expect(input).toHaveValue(12)
   expect(
     screen.getByRole('button', { name: 'Save token chart' })
@@ -270,7 +280,7 @@ it('single-date entry defaults to yesterday so saving is inside the public range
     selector: 'input',
   })
   expect(date).toHaveValue('2026-09-30')
-  expect(date).toHaveAttribute('max', '2026-09-30')
+  expect(date).not.toHaveAttribute('max')
   await user.type(
     screen.getByRole('spinbutton', { name: 'Daily token count' }),
     '0'
@@ -283,6 +293,93 @@ it('single-date entry defaults to yesterday so saving is inside the public range
   )
 })
 
+it('single-day editing accepts a future UTC date and preserves the raw integer input', async () => {
+  const user = userEvent.setup()
+  renderSettings()
+  await user.click(
+    await screen.findByRole('tab', { name: 'Daily usage display' })
+  )
+  await user.click(screen.getByRole('tab', { name: 'Single date' }))
+  fireEvent.change(
+    screen.getByLabelText('Usage date (UTC)', { selector: 'input' }),
+    { target: { value: '2999-01-01' } }
+  )
+  const count = screen.getByRole('spinbutton', { name: 'Daily token count' })
+  await user.type(count, '1234567')
+  expect(count).toHaveValue(1234567)
+  await user.click(screen.getByRole('button', { name: 'Save daily usage' }))
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith('/api/option/daily_usage', {
+      items: [{ date: '2999-01-01', token_count: 1234567 }],
+    })
+  )
+})
+
+it('a future range loads editable future bars and exposes their single-day editing and deletion', async () => {
+  const user = userEvent.setup()
+  renderSettings()
+  await user.click(
+    await screen.findByRole('tab', { name: 'Daily usage display' })
+  )
+  fireEvent.change(await screen.findByLabelText('Range end date (UTC)'), {
+    target: { value: '2999-01-01' },
+  })
+  await waitFor(() =>
+    expect(api.get).toHaveBeenCalledWith('/api/option/daily_usage', {
+      params: { days: 30, to: '2999-01-01' },
+    })
+  )
+  await screen.findByRole('slider', { name: 'Tokens for 2999-01-01' })
+  await user.click(
+    screen.getByRole('button', { name: 'Edit usage for 2999-01-01' })
+  )
+  expect(
+    screen.getByLabelText('Usage date (UTC)', { selector: 'input' })
+  ).toHaveValue('2999-01-01')
+  await user.click(
+    screen.getByRole('button', { name: 'Delete usage for 2999-01-01' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Delete daily record' }))
+  await waitFor(() =>
+    expect(api.delete).toHaveBeenCalledWith(
+      '/api/option/daily_usage/2999-01-01'
+    )
+  )
+})
+
+it('token display units stay K/M/B/T with one decimal across interface languages and do not round integer inputs', async () => {
+  const user = userEvent.setup()
+  renderSettings(undefined, 1234567)
+  await user.click(
+    await screen.findByRole('tab', { name: 'Daily usage display' })
+  )
+  const status = await screen.findByRole('status')
+  try {
+    for (const language of [
+      'zhCN',
+      'zhTW',
+      'en',
+      'fr',
+      'ru',
+      'ja',
+      'vi',
+      'invalid-locale',
+    ]) {
+      await act(async () => {
+        await i18next.changeLanguage(language)
+      })
+      expect(status).toHaveTextContent('1.2M Tokens')
+    }
+  } finally {
+    await act(async () => {
+      await i18next.changeLanguage('en')
+    })
+  }
+  expect(
+    screen.getByRole('spinbutton', { name: 'Tokens for 2026-09-30' })
+  ).toHaveValue(1234567)
+})
+
 it('bulk usage sends all CSV token values in one update', async () => {
   const user = userEvent.setup()
   renderSettings()
@@ -292,13 +389,13 @@ it('bulk usage sends all CSV token values in one update', async () => {
   await user.click(await screen.findByRole('tab', { name: 'Batch CSV' }))
   await user.type(
     screen.getByRole('textbox', { name: 'Daily usage CSV' }),
-    'date,token_count{enter}2026-09-30,10{enter}2026-09-29,0'
+    'date,token_count{enter}2999-01-01,10{enter}2026-09-29,0'
   )
   await user.click(screen.getByRole('button', { name: 'Save usage batch' }))
   await waitFor(() =>
     expect(api.put).toHaveBeenCalledWith('/api/option/daily_usage', {
       items: [
-        { date: '2026-09-30', token_count: 10 },
+        { date: '2999-01-01', token_count: 10 },
         { date: '2026-09-29', token_count: 0 },
       ],
     })

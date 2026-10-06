@@ -587,6 +587,35 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					assert.NotContains(t, recorder.Body.String(), "updated_by")
 					assert.NotContains(t, recorder.Body.String(), "private-usage-editor")
 				}
+				// Future values are manageable in advance but never exposed before
+				// their UTC date has ended, even when the public caller supplies to.
+				futureBody := `{"items":[{"date":"2999-01-01","token_count":456000000},{"date":"2998-12-31","token_count":0}]}`
+				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", futureBody, root).Code)
+				futureRead := request(http.MethodGet, "/api/option/daily_usage?days=7&to=2999-01-01", "", root)
+				require.Equal(t, http.StatusOK, futureRead.Code, futureRead.Body.String())
+				var futureReply struct {
+					Data model.PublicDailyUsageSeries `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(futureRead.Body.Bytes(), &futureReply))
+				assert.Equal(t, "2999-01-01", futureReply.Data.To)
+				assert.EqualValues(t, 456000000, futureReply.Data.Total)
+				assert.Equal(t, 2, futureReply.Data.RecordedDays)
+				require.Len(t, futureReply.Data.Items, 7)
+				require.NotNil(t, futureReply.Data.Items[5].TokenCount)
+				assert.Zero(t, *futureReply.Data.Items[5].TokenCount)
+				assert.NotContains(t, futureRead.Body.String(), "updated_by")
+				assert.NotContains(t, request(http.MethodGet, "/api/public/usage/daily?days=7", "", "").Body.String(), "2999")
+				assert.Equal(t, http.StatusBadRequest, request(http.MethodGet, "/api/public/usage/daily?days=7&to=2999-01-01", "", "").Code)
+				for _, suffix := range []string{"?to=", "?to=bad", "?to=2026-02-30", "?to=10000-01-01", "?to=2999-01-01&to=2999-01-02", "?to=2999-01-01&model=x"} {
+					assert.Equal(t, http.StatusBadRequest, request(http.MethodGet, "/api/option/daily_usage"+suffix, "", root).Code, suffix)
+				}
+				futureDate, err := time.Parse("2006-01-02", "2999-01-01")
+				require.NoError(t, err)
+				published, err := model.ListPublicDailyUsage(context.Background(), 7, false, futureDate.AddDate(0, 0, 1))
+				require.NoError(t, err)
+				assert.EqualValues(t, 456000000, published.Total)
+				require.Equal(t, http.StatusOK, request(http.MethodDelete, "/api/option/daily_usage/2999-01-01", "", root).Code)
+				assert.Equal(t, http.StatusNotFound, request(http.MethodDelete, "/api/option/daily_usage/2999-01-01", "", root).Code)
 				// Correction is an upsert, not a duplicate or an additive increment.
 				correction := fmt.Sprintf(`{"items":[{"date":%q,"token_count":7}]}`, yesterday)
 				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", correction, root).Code)
@@ -596,7 +625,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1.5}]}`, yesterday),
 					fmt.Sprintf(`{"items":[{"date":%q,"token_count":null}]}`, yesterday),
 					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1000000000001}]}`, yesterday),
-					fmt.Sprintf(`{"items":[{"date":%q,"token_count":10},{"date":"2999-01-01","token_count":1}]}`, yesterday),
+					fmt.Sprintf(`{"items":[{"date":%q,"token_count":10},{"date":"2026-02-30","token_count":1}]}`, yesterday),
 					fmt.Sprintf(`{"items":[{"date":%q,"token_count":1},{"date":%q,"token_count":2}]}`, yesterday, yesterday),
 					fmt.Sprintf(`{"items":[{"date":%q,"request_count":1}]}`, yesterday),
 					correction + correction,

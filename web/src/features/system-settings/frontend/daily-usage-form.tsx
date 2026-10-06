@@ -44,7 +44,7 @@ import {
 type DayForm = { date: string; count: string }
 
 export function DailyUsageForm(props: {
-  maxDate: string
+  defaultDate: string
   pending: boolean
   selected: DailyUsageInput | null
   onSave: (items: DailyUsageInput[]) => Promise<void>
@@ -56,8 +56,8 @@ export function DailyUsageForm(props: {
         date: z
           .string()
           .refine(
-            (value) => validUsageDate(value, props.maxDate),
-            t('Choose an ended UTC date')
+            validUsageDate,
+            t('Choose a valid UTC date from 1970 onwards')
           ),
         count: z
           .string()
@@ -68,7 +68,7 @@ export function DailyUsageForm(props: {
       })
     ),
     defaultValues: {
-      date: props.selected?.date ?? props.maxDate,
+      date: props.selected?.date ?? props.defaultDate,
       count: props.selected ? String(props.selected.token_count) : '',
     },
   })
@@ -97,7 +97,6 @@ export function DailyUsageForm(props: {
                 <Input
                   type='date'
                   min='1970-01-01'
-                  max={props.maxDate}
                   disabled={props.pending}
                   {...field}
                 />
@@ -140,7 +139,6 @@ export function DailyUsageForm(props: {
 }
 
 export function DailyUsageCsvForm(props: {
-  maxDate: string
   pending: boolean
   onSave: (items: DailyUsageInput[]) => Promise<void>
 }) {
@@ -150,7 +148,7 @@ export function DailyUsageCsvForm(props: {
       z.object({
         csv: z.string().refine((raw) => {
           try {
-            parseUsageCsv(raw, props.maxDate)
+            parseUsageCsv(raw)
             return true
           } catch {
             return false
@@ -166,7 +164,7 @@ export function DailyUsageCsvForm(props: {
         className='flex flex-col gap-4'
         onSubmit={form.handleSubmit(async (values) => {
           try {
-            await props.onSave(parseUsageCsv(values.csv, props.maxDate))
+            await props.onSave(parseUsageCsv(values.csv))
             form.reset({ csv: '' })
           } catch {
             // Preserve the full batch if validation or the server rejects it.
