@@ -647,6 +647,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		publicRatio = *channel.PublicRatio
 	}
 	c.Set("channel_public_ratio", publicRatio)
+	c.Set(model.ChannelPricingSettingsContextKey, channel.OtherSettings)
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelCreateTime, channel.CreatedTime)

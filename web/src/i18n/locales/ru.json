@@ -6777,6 +6777,12 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model token prices": "Цены токенов моделей канала",
+    "Override system model pricing": "Переопределить системные цены модели",
+    "Use input/output price": "Использовать цену ввода/вывода",
+    "Token prices must be between 0 and 1000000000 USD per million tokens.": "Цены должны быть от 0 до 1000000000 USD за миллион токенов.",
+    "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Базовые цены для пользователя в USD за миллион токенов до коэффициентов группы, публичного коэффициента и комиссии. Используются точные публичные имена моделей, а не имена после преобразования.",
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Цены ввода и вывода обязательны. Пустые категории используют эти цены, а не системные. Явный ноль означает бесплатно. Запись кэша (5 мин/по умолчанию) и 1 ч оцениваются отдельно. Отключите переопределение для восстановления системных цен."
   }
 }

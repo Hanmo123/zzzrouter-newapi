@@ -312,7 +312,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				billingPrepared = true
 			} else {
 				info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
-				if apiErr = service.PrepareTieredBillingForSelectedGroup(c, info); apiErr != nil {
+				if apiErr = PrepareSelectedChannelBilling(c, info); apiErr != nil {
 					return apiErr
 				}
 			}
@@ -604,6 +604,7 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 		publicRatio = *channel.PublicRatio
 	}
 	c.Set("channel_public_ratio", publicRatio)
+	c.Set(appmodel.ChannelPricingSettingsContextKey, channel.OtherSettings)
 	for key, value := range s.lockedContext {
 		c.Set(string(key), value)
 	}

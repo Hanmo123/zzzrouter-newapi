@@ -211,6 +211,7 @@ import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelQuickOptions } from '../channel-quick-options'
+import { ChannelTokenPricingFields } from '../channel-token-pricing-fields'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
@@ -2587,6 +2588,12 @@ export function ChannelMutateDrawer({
 
         <ChannelProviderFields control={form.control} />
         <ChannelObservationFields control={form.control} />
+        {currentType !== CHANNEL_TYPE_TASK_PLUGIN && (
+          <ChannelTokenPricingFields
+            control={form.control}
+            disabled={sensitiveLocked}
+          />
+        )}
         {isEditing && channelId != null && (
           <ChannelDegradationExclusion
             channelId={channelId}

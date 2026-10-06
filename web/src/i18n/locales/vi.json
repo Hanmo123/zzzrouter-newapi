@@ -6777,6 +6777,12 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Channel model token prices": "Đơn giá token theo mô hình của kênh",
+    "Override system model pricing": "Ghi đè giá mô hình hệ thống",
+    "Use input/output price": "Dùng giá đầu vào/đầu ra",
+    "Token prices must be between 0 and 1000000000 USD per million tokens.": "Đơn giá phải từ 0 đến 1000000000 USD trên một triệu token.",
+    "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Giá cơ sở tính cho người dùng theo USD trên một triệu token, trước hệ số nhóm, hệ số công khai và phí dịch vụ. Khớp chính xác tên mô hình công khai, không dùng tên ánh xạ phía nhà cung cấp.",
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Bắt buộc có giá đầu vào và đầu ra. Các mục tùy chọn để trống dùng giá đầu vào/đầu ra, không dùng giá hệ thống. Giá 0 là miễn phí. Ghi bộ nhớ đệm (5 phút/mặc định) và 1 giờ có thể đặt giá riêng. Tắt ghi đè để khôi phục giá hệ thống."
   }
 }

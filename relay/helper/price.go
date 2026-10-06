@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -91,6 +92,27 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
+	channel := model.Channel{OtherSettings: c.GetString(model.ChannelPricingSettingsContextKey)}
+	prices, err := channel.GetModelTokenPrices()
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	// Match the routed public model, before canonical billing aliases or upstream
+	// mapping. Strip request modifiers only as a fallback, never use upstream IDs.
+	priceModel := info.GetOriginModelName()
+	expr, overridden, err := prices.Expression(priceModel)
+	if !overridden && err == nil {
+		expr, overridden, err = prices.Expression(hostreasoning.BaseModelName(priceModel))
+	}
+	if err != nil {
+		return hosttypes.PriceData{}, err
+	}
+	info.PricingChannelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	info.ChannelTokenPricing = overridden
+	info.TieredBillingSnapshot = nil
+	if overridden {
+		return modelPriceHelperExpression(c, info, priceModel, expr, promptTokens, groupRatioInfo)
+	}
 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
@@ -359,6 +381,10 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 	if !ok {
 		return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", billingModelName)
 	}
+	return modelPriceHelperExpression(c, info, billingModelName, exprStr, promptTokens, groupRatioInfo)
+}
+
+func modelPriceHelperExpression(c *gin.Context, info *relaycommon.RelayInfo, billingModelName, exprStr string, promptTokens int, groupRatioInfo hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
 	exprHash := billingexpr.ExprHashString(exprStr)
 	if info.RelayFormat == types.RelayFormatOpenAIRealtime && billingexpr.UsesFixedPricingByHash(exprStr, exprHash) {
 		return hosttypes.PriceData{}, fmt.Errorf("fixed pricing is not supported for Realtime requests")

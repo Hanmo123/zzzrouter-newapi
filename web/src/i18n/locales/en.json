@@ -6893,6 +6893,12 @@
     "When models are specified above, the default must be included in the list.": "When models are specified above, the default must be included in the list.",
     "Enter up to 100 unique model names, one per line": "Enter up to 100 unique model names, one per line",
     "Default model must be one of the displayed models": "Default model must be one of the displayed models",
-    "Save settings": "Save settings"
+    "Save settings": "Save settings",
+    "Channel model token prices": "Channel model token prices",
+    "Override system model pricing": "Override system model pricing",
+    "Use input/output price": "Use input/output price",
+    "Token prices must be between 0 and 1000000000 USD per million tokens.": "Token prices must be between 0 and 1000000000 USD per million tokens.",
+    "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.",
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing."
   }
 }

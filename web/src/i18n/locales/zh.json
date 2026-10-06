@@ -6893,6 +6893,12 @@
     "When models are specified above, the default must be included in the list.": "指定展示模型时，默认模型必须包含在列表中。",
     "Enter up to 100 unique model names, one per line": "每行填写一个不重复的模型名称，最多 100 个",
     "Default model must be one of the displayed models": "默认模型必须是展示的模型之一",
-    "Save settings": "保存设置"
+    "Save settings": "保存设置",
+    "Channel model token prices": "渠道模型 Token 单价",
+    "Override system model pricing": "覆盖系统模型定价",
+    "Use input/output price": "使用输入/输出单价",
+    "Token prices must be between 0 and 1000000000 USD per million tokens.": "Token 单价必须在 0 至 1000000000 美元/百万 Token 之间。",
+    "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "用户计费基础价，单位为美元/百万 Token，尚未乘分组倍率、公开倍率与服务费。按对外模型名称精确匹配，不使用映射后的上游名称。",
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "输入与输出单价必填。可选类别留空时按输入/输出单价计费，不继承系统价格；显式填写 0 表示免费。缓存写入（5 分钟/通用）与 1 小时可分别定价。关闭覆盖后恢复系统定价。"
   }
 }

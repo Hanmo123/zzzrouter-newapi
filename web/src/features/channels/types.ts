@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import type { ChannelTokenPrices } from './lib/channel-token-pricing'
+
 // ============================================================================
 // Channel Schema & Types
 // ============================================================================
@@ -101,6 +103,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  model_token_prices?: ChannelTokenPrices
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean

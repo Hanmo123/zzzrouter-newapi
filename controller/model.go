@@ -249,6 +249,14 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 	}
 	models := service.GetGroupsEnabledModels(ownerGroups)
+	var channelPricedModels map[string]bool
+	if !acceptUnsetRatioModel {
+		channelPricedModels, err = model.GetChannelPricedModels(ownerGroups)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "get channel model pricing failed"})
+			return
+		}
+	}
 	for _, modelName := range models {
 		if modelLimitEnable {
 			matchingName := ratio_setting.RoutingMatchModelName(modelName)
@@ -256,7 +264,7 @@ func ListModels(c *gin.Context, modelType int) {
 				continue
 			}
 		}
-		if !acceptUnsetRatioModel && !helper.HasModelBillingConfig(modelName) {
+		if !acceptUnsetRatioModel && !helper.HasModelBillingConfig(modelName) && !channelPricedModels[modelName] {
 			continue
 		}
 		userModelNames = append(userModelNames, modelName)

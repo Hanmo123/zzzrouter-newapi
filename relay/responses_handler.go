@@ -79,7 +79,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	usageDto := usage.(*dto.Usage)
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+	// Channel-local pricing is already frozen before submission. Compact's
+	// legacy repricing must not replace it after receiving upstream usage.
+	if info.RelayMode == relayconstant.RelayModeResponsesCompact && !info.ChannelTokenPricing {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
 
@@ -101,7 +103,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 }
 
 // ConsumeResponsesQuota applies the same settlement dispatch to HTTP and
-// WebSocket Responses usage. Compact requests keep their separate repricing.
+// WebSocket Responses usage. Compact keeps legacy repricing unless a channel
+// token-price snapshot is active.
 func ConsumeResponsesQuota(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage) {
 	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
 		service.PostAudioConsumeQuota(c, info, usage, "")

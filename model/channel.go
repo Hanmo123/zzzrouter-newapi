@@ -1078,6 +1078,9 @@ func SearchTags(keyword string, group string, model string, idSort bool) ([]*str
 }
 
 func (channel *Channel) ValidateSettings() error {
+	if err := channel.ValidateModelTokenPrices(); err != nil {
+		return err
+	}
 	channelParams := &dto.ChannelSettings{}
 	if channel.Setting != nil && *channel.Setting != "" {
 		err := common.Unmarshal([]byte(*channel.Setting), channelParams)
@@ -1161,7 +1164,17 @@ func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {
 }
 
 func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
-	settingBytes, err := common.Marshal(setting)
+	// Host billing configuration is not part of relaykit's protocol settings.
+	// Preserve it when operational endpoints update discovery/adapter settings.
+	prices, err := channel.GetModelTokenPrices()
+	if err != nil {
+		common.SysError(fmt.Sprintf("failed to preserve channel token prices: channel_id=%d, error=%v", channel.Id, err))
+		return
+	}
+	settingBytes, err := common.Marshal(struct {
+		dto.ChannelOtherSettings
+		Prices ChannelTokenPrices `json:"model_token_prices,omitempty"`
+	}{setting, prices})
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err))
 		return

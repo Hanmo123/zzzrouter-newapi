@@ -41,6 +41,10 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
+import {
+  channelTokenPricesSchema,
+  type ChannelTokenPrices,
+} from './channel-token-pricing'
 
 // ============================================================================
 // Form Validation Schema
@@ -275,6 +279,7 @@ export const channelFormSchema = z
       .string()
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
+    model_token_prices: channelTokenPricesSchema.optional(),
     advanced_custom: z.string().optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
@@ -478,6 +483,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   param_override: '',
   header_override: '',
   settings: '{}',
+  model_token_prices: {},
   other: '',
   multi_key_mode: 'single',
   multi_key_type: 'random',
@@ -584,10 +590,12 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
+  let modelTokenPrices: ChannelTokenPrices = {}
 
   if (channel.settings) {
     try {
       const parsed = JSON.parse(channel.settings)
+      modelTokenPrices = parsed.model_token_prices ?? {}
       vertexKeyType = parsed.vertex_key_type || 'json'
       azureResponsesVersion = parsed.azure_responses_version || ''
       isEnterpriseAccount = parsed.openrouter_enterprise === true
@@ -647,6 +655,7 @@ export function transformChannelToFormDefaults(
     param_override: channel.param_override || '',
     header_override: channel.header_override || '',
     settings: channel.settings || '{}',
+    model_token_prices: modelTokenPrices,
     other: channel.other || '',
     multi_key_mode: 'single',
     multi_key_type: channel.channel_info.multi_key_mode || 'random',
@@ -859,6 +868,9 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.advanced_custom
   }
 
+  if (formData.model_token_prices !== undefined) {
+    settingsObj.model_token_prices = formData.model_token_prices
+  }
   return JSON.stringify(settingsObj)
 }
 

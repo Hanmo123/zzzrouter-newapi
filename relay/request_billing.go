@@ -6,14 +6,17 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 )
@@ -64,6 +67,34 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 		return nil
 	}
 	return service.PreConsumeBilling(c, priceData.QuotaToPreConsume, info)
+}
+
+// PrepareSelectedChannelBilling refreshes channel-local prices on a retry and
+// reserves any increase before upstream submission. Settlement uses this frozen
+// expression even if the administrator edits the channel while it is running.
+func PrepareSelectedChannelBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info.PricingChannelID != common.GetContextKeyInt(c, constant.ContextKeyChannelId) {
+		channel := model.Channel{OtherSettings: c.GetString(model.ChannelPricingSettingsContextKey)}
+		prices, err := channel.GetModelTokenPrices()
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry())
+		}
+		name := info.GetOriginModelName()
+		_, exact := prices[name]
+		_, base := prices[hostreasoning.BaseModelName(name)]
+		if info.ChannelTokenPricing || exact || base {
+			meta := &types.TokenCountMeta{}
+			if info.Request != nil {
+				meta = info.Request.GetTokenCountMeta()
+			}
+			if _, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), meta); err != nil {
+				return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
+			}
+		} else {
+			info.PricingChannelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+		}
+	}
+	return service.PrepareTieredBillingForSelectedGroup(c, info)
 }
 
 // RefundFailedRequestBilling applies the common final-failure policy after all

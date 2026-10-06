@@ -179,8 +179,12 @@ type RelayInfo struct {
 	// Auto-group retries refresh its group-dependent fields before each attempt
 	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
-	BillingRequestInput   *billingexpr.RequestInput
-	BillingImageCount     *int
+	// A channel retry must replace (or remove) a channel-local token price before
+	// reserving funds. Configuration stays frozen within one channel attempt.
+	PricingChannelID    int
+	ChannelTokenPricing bool
+	BillingRequestInput *billingexpr.RequestInput
+	BillingImageCount   *int
 	// ImageRequestCount is the effective quantity sent on the current attempt;
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int
