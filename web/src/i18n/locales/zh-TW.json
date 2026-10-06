@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "渠道模型與計費",
+    "Configure model: {{model}}": "設定模型：{{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "每個公開模型獨立設定價格和觀測資料。使用者扣費最後乘分組倍率；採購成本不含服務費與分組倍率。",
+    "Upstream discount": "上游折扣",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "採購成本 = 計費基礎 × 上游折扣；0.8 表示以八折採購。",
+    "Use model billing expression": "使用模型計費表達式",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "公開倍率以基礎級距 Token 價格自動比較計算，不會再次乘入表達式扣費。",
+    "No comparable system token prices. This model is excluded from dispatch.": "無法與系統 Token 價格比較，此模型不參與調度。",
+    "Public ratio is automatic with an expression.": "使用表達式時公開倍率自動計算。",
+    "Invalid billing expression": "計費表達式無效",
+    "Model charge multiplier": "模型計費倍率",
+    "Procurement cost": "採購成本",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "最終扣費 = 模型計費基礎 × (1 + 服務費率) × 分組倍率；採購成本 = 模型計費基礎 × 上游折扣。",
     "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.": "私有上游倍率用於 floor 成本排序和 multiplier 篩選，不直接用於使用者計費。",
     "Public multiplier applied to customer billing after the group ratio and before the service fee.": "使用者費用在分組倍率基礎上乘此公開倍率，再計算服務費。",
     "Relay service fee": "中轉服務費",

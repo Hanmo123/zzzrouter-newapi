@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -141,42 +140,4 @@ func BeginDegradationScan(ctx context.Context, runnerID string, payload any, loc
 		return tx.Create(task).Error
 	})
 	return task, err
-}
-
-// ApplyDegradationScanSummary publishes a whole-channel verdict only after all
-// selected models were measured. Partial model filters never call this method.
-// Per-model facts stay append-only; they are not fake channel aggregate samples.
-func ApplyDegradationScanSummary(ctx context.Context, source *Channel, taskID, runnerID string, startedAt, completedAt int64, degraded *bool, online bool, ttft *int64) (bool, error) {
-	applied := false
-	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var lease SystemTaskLock
-		err := lockForUpdate(tx).Where("type = ? AND task_id = ? AND locked_by = ? AND locked_until >= ?", SystemTaskTypeChannelDegradation, taskID, runnerID, common.GetTimestamp()).First(&lease).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrSystemTaskLockLost
-		}
-		if err != nil {
-			return err
-		}
-		var current Channel
-		err = lockForUpdate(tx).First(&current, source.Id).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if current.Status != common.ChannelStatusEnabled || current.SkipDegradationCheck || !reflect.DeepEqual(channelDegradationInputs(source), channelDegradationInputs(&current)) || (current.LastCheckedAt != nil && *current.LastCheckedAt > startedAt/1000) {
-			return nil
-		}
-		updates := map[string]any{"is_degraded": degraded, "is_online": online, "last_checked_at": completedAt / 1000}
-		if ttft != nil && *ttft >= 0 {
-			updates["ttft_ms"] = *ttft
-		}
-		if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(updates).Error; err != nil {
-			return err
-		}
-		applied = true
-		return nil
-	})
-	return applied, err
 }

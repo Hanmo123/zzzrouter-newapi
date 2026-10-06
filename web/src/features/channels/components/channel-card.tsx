@@ -150,17 +150,7 @@ function ChannelCardComponent({
         </StatusBadgeTypeContext.Provider>
 
         <dl className='grid grid-cols-2 gap-3'>
-          {(
-            [
-              ['provider_id', t('Provider')],
-              ['upstream_ratio', t('Upstream ratio')],
-              ['public_ratio', t('Public ratio')],
-              ['is_degraded', t('Is degraded')],
-              ['is_online', t('Callable (online)')],
-              ['ttft_ms', t('Time to first token (ms)')],
-              ['last_checked_at', t('Last checked')],
-            ] as const
-          ).map(([id, label]) => (
+          {([['provider_id', t('Provider')]] as const).map(([id, label]) => (
             <div key={id} className='min-w-0'>
               <dt className={labelClass}>{label}</dt>
               <dd className='min-w-0 text-sm break-words tabular-nums'>

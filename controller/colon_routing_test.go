@@ -76,16 +76,16 @@ func TestColonRoutingBilling(t *testing.T) {
 			wantStatus, wantCharge int
 			wantAttempts           []int
 		}{
-			{"same_cost_before_higher", ":floor", 1, true, 100000, 200, 6300, []int{0, 1}},
-			{"advance_cost_tier", ":floor", 2, true, 100000, 200, 1050, []int{0, 1, 2}},
-			{"filtered_cost", ":floor:multiplier>0.2:multiplier<=0.4", 0, true, 100000, 200, 1050, []int{2}},
-			{"ordinary_priority", "", 0, true, 100000, 200, 1050, []int{2}},
-			{"legacy_request_price", ":floor", 1, true, 100000, 200, 6300, []int{0, 1}},
+			{"same_cost_before_higher", ":floor", 1, true, 100000, 200, 2100, []int{0, 1}},
+			{"advance_cost_tier", ":floor", 2, true, 100000, 200, 4200, []int{0, 1, 2}},
+			{"filtered_cost", ":floor:multiplier>0.2:multiplier<=0.4", 0, true, 100000, 200, 4200, []int{2}},
+			{"ordinary_priority", "", 0, true, 100000, 200, 4200, []int{2}},
+			{"legacy_request_price", ":floor", 1, true, 100000, 200, 2100, []int{0, 1}},
 			{"legacy_token_price", ":floor", 0, true, 100000, 200, 84, []int{0}},
 			{"forbidden_model", ":floor", 0, true, 100000, 403, 0, nil},
 			{"failed_all", ":floor", 3, true, 100000, 500, 0, []int{0, 1, 2}},
 			{"no_fee", ":floor", 0, false, 100000, 200, 2000, []int{0}},
-			{"reserve_before_retry", ":floor", 1, true, 4000, 403, 0, []int{0}},
+			{"reserve_before_retry", ":floor", 2, true, 3000, 403, 0, []int{0, 1}},
 			{"no_match", ":floor:multiplier<0.1", 0, true, 100000, 503, 0, nil},
 			{"bad_rule", ":floor:multiplier=NaN", 0, true, 100000, 400, 0, nil},
 		} {
@@ -155,14 +155,14 @@ func TestColonRoutingBilling(t *testing.T) {
 					if i == 3 {
 						group = "forbidden"
 					}
-					public := []float64{0.2, 0.6, 0.1, 0.01}[i]
+					public := []float64{0.2, 0.2, 0.4, 0.01}[i]
 					weight := uint(0)
 					if i != 1 {
 						weight = 100
 					}
 					priority := int64(100 + i)
 					mapping := `{"route-test":"mapped-upstream"}`
-					channel := &model.Channel{Name: fmt.Sprintf("route-%d", i), Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Key: fmt.Sprintf("route-key-%d", i), BaseURL: &upstream.URL, Group: group, Models: "route-test", ModelMapping: &mapping, UpstreamRatio: &cost, PublicRatio: &public, Weight: &weight, Priority: &priority}
+					channel := &model.Channel{Name: fmt.Sprintf("route-%d", i), Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Key: fmt.Sprintf("route-key-%d", i), BaseURL: &upstream.URL, Group: group, Models: "route-test", ModelMapping: &mapping, ModelConfigs: model.ChannelModelConfigs{"route-test": {UpstreamDiscount: &cost, PublicRatio: &public}}, Weight: &weight, Priority: &priority}
 					require.NoError(t, model.DB.Create(channel).Error)
 					require.NoError(t, channel.AddAbilities(nil))
 					ids = append(ids, channel.Id)

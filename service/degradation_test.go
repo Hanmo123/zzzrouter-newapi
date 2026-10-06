@@ -683,8 +683,17 @@ func TestDegradationConcurrentExecution(t *testing.T) {
 				assert.Equal(t, samples, latencies)
 			}
 			if !scenario.cancel {
-				require.NoError(t, db.Model(&model.Channel{}).Where("ttft_ms IS NOT NULL").Count(&latencies).Error)
-				assert.EqualValues(t, 5, latencies)
+				var observed []model.Channel
+				require.NoError(t, db.Find(&observed).Error)
+				latencies = 0
+				for _, ch := range observed {
+					for _, cfg := range ch.ModelConfigs {
+						if cfg.TTFTMs != nil {
+							latencies++
+						}
+					}
+				}
+				assert.EqualValues(t, scenario.total, latencies)
 				if !scenario.scheduled {
 					previous := 0
 					for line := range strings.SplitSeq(strings.TrimSpace(output.String()), "\n") {
@@ -870,7 +879,7 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, 1, summary.Abnormal)
 	assert.Equal(t, 1, summary.Errors)
 	assert.Equal(t, 2, summary.Skipped)
-	assert.Equal(t, 2, summary.SnapshotApplied)
+	assert.Equal(t, 4, summary.SnapshotApplied)
 	for _, secret := range []string{"scan-key-canary", "scan-response-canary", server.URL} {
 		assert.NotContains(t, output.String()+stderr.String(), secret)
 	}
@@ -878,26 +887,26 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Where("task_id = ?", summary.TaskID).Find(&samples).Error)
 	require.Len(t, samples, 5)
 	for _, sample := range samples {
-		assert.False(t, sample.SnapshotApplied, "individual model samples must not overwrite channel-wide health")
+		assert.Equal(t, sample.ChannelID != channels[1].Id, sample.SnapshotApplied)
 	}
 	var mixed, inconclusive, disabled model.Channel
 	require.NoError(t, db.First(&mixed, channels[0].Id).Error)
-	require.NotNil(t, mixed.IsDegraded)
-	assert.True(t, *mixed.IsDegraded, "last normal model cannot hide the earlier abnormal model")
-	var maximum int64
+	require.NotNil(t, mixed.ModelConfig("m-b").IsDegraded)
+	assert.True(t, *mixed.ModelConfig("m-b").IsDegraded)
+	require.NotNil(t, mixed.ModelConfig("m-a").IsDegraded)
+	assert.False(t, *mixed.ModelConfig("m-a").IsDegraded)
 	for _, sample := range samples {
-		if sample.ChannelID == mixed.Id && sample.TTFTMs != nil {
-			maximum = max(maximum, *sample.TTFTMs)
+		if sample.ChannelID == mixed.Id {
+			assert.Equal(t, sample.TTFTMs, mixed.ModelConfig(sample.Model).TTFTMs)
 		}
 	}
-	require.NotNil(t, mixed.TTFTMs)
-	assert.Equal(t, maximum, *mixed.TTFTMs)
 	require.NoError(t, db.First(&inconclusive, channels[2].Id).Error)
-	assert.Nil(t, inconclusive.IsDegraded)
-	require.NotNil(t, inconclusive.IsOnline)
-	assert.True(t, *inconclusive.IsOnline)
+	assert.Nil(t, inconclusive.ModelConfig("m-c").IsDegraded)
+	require.NotNil(t, inconclusive.ModelConfig("m-c").IsOnline)
+	assert.False(t, *inconclusive.ModelConfig("m-c").IsOnline)
+	assert.True(t, *inconclusive.ModelConfig("m-a").IsOnline)
 	require.NoError(t, db.First(&disabled, channels[1].Id).Error)
-	assert.Nil(t, disabled.LastCheckedAt)
+	assert.Empty(t, disabled.ModelConfigs)
 	assert.Equal(t, common.ChannelStatusManuallyDisabled, disabled.Status)
 	for _, scenario := range []struct {
 		name                    string
@@ -923,8 +932,8 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 			require.NoError(t, common.UnmarshalJsonStr(lines[len(lines)-1], &result))
 			assert.Equal(t, scenario.targets, result.Targets)
 			assert.EqualValues(t, scenario.requests, hits.Load()-before)
-			if slices.Contains(scenario.args, "--model") {
-				assert.Zero(t, result.SnapshotApplied)
+			if slices.Contains(scenario.args, "--model") && scenario.requests > 0 {
+				assert.Positive(t, result.SnapshotApplied)
 			}
 		})
 	}
@@ -935,16 +944,15 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 		assert.Equal(t, before, hits.Load())
 		assert.NotContains(t, stderr.String(), "unknown-secret-canary")
 	}
-	// Editing a channel mid-request invalidates the aggregate, but not the
-	// immutable model observations from the configuration actually tested.
-	require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[0].Id).Update("is_degraded", false).Error)
+	// Editing a channel mid-request prevents stale model observations.
+	require.NoError(t, db.First(&mixed, channels[0].Id).Error)
+	originalConfigs := mixed.ModelConfigs
 	changeChannel.Store(int64(channels[0].Id))
 	var changedOut, changedErr bytes.Buffer
 	assert.Equal(t, 1, RunDegradationCLI(context.Background(), []string{"--channel-id", strconv.Itoa(channels[0].Id), "--allow-http"}, &changedOut, &changedErr), changedErr.String())
 	var changed model.Channel
 	require.NoError(t, db.First(&changed, channels[0].Id).Error)
-	require.NotNil(t, changed.IsDegraded)
-	assert.False(t, *changed.IsDegraded)
+	assert.Equal(t, originalConfigs, changed.ModelConfigs)
 	require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[0].Id).Update("key", "scan-key-canary").Error)
 	// Real lease contention: neither another CLI nor a periodic worker may
 	// replace this scan's filters or double its requests.
@@ -1244,7 +1252,8 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 					}))
 					defer server.Close()
 					base, mapping, testModel, ttft := server.URL, `{"alias":"middle","middle":"upstream-model"}`, "alias", int64(25)
-					source.BaseURL, source.ModelMapping, source.TestModel, source.TTFTMs = &base, &mapping, &testModel, &ttft
+					source.BaseURL, source.ModelMapping, source.TestModel = &base, &mapping, &testModel
+					source.ModelConfigs = model.ChannelModelConfigs{"alias": {TTFTMs: &ttft}}
 					source.Models = "other-model,alias"
 					source.Key = "disabled-private-canary\nprivate-enabled-canary"
 					source.ChannelInfo = model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2, MultiKeyMode: constant.MultiKeyModePolling, MultiKeyPollingIndex: 1, MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled}}
@@ -1253,7 +1262,12 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 					for _, state := range []int32{0, 1, 2, 3} {
 						responseMode.Store(state)
 						if state == 3 {
-							require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("is_degraded", false).Error)
+							var stored model.Channel
+							require.NoError(t, db.First(&stored, source.Id).Error)
+							cfg := stored.ModelConfig("alias")
+							cfg.IsDegraded = common.GetPointer(false)
+							stored.ModelConfigs["alias"] = cfg
+							require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("model_configs", stored.ModelConfigs).Error)
 						}
 						task, err := model.CreateSystemTask(handler.Type(), handler.NewPayload(), nil)
 						require.NoError(t, err)
@@ -1290,28 +1304,29 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 							assert.LessOrEqual(t, *sample.TTFTMs, sample.DurationMs)
 							ttft = *sample.TTFTMs
 						}
-						assert.Equal(t, &ttft, current.TTFTMs)
+						config := current.ModelConfig("alias")
+						assert.Equal(t, &ttft, config.TTFTMs)
 						assert.Equal(t, common.ChannelStatusEnabled, current.Status)
 						assert.Equal(t, 1, current.ChannelInfo.MultiKeyPollingIndex)
 						switch state {
 						case 0:
 							assert.Equal(t, "normal", sample.State)
-							require.NotNil(t, current.IsDegraded)
-							assert.False(t, *current.IsDegraded)
+							require.NotNil(t, config.IsDegraded)
+							assert.False(t, *config.IsDegraded)
 							assert.True(t, sample.SnapshotApplied)
 						case 1:
 							assert.Equal(t, "abnormal", sample.State)
-							require.NotNil(t, current.IsDegraded)
-							assert.True(t, *current.IsDegraded)
+							require.NotNil(t, config.IsDegraded)
+							assert.True(t, *config.IsDegraded)
 						case 2:
 							assert.Equal(t, "error", sample.State)
-							assert.Nil(t, current.IsDegraded)
-							require.NotNil(t, current.IsOnline)
-							assert.False(t, *current.IsOnline)
+							assert.Nil(t, config.IsDegraded)
+							require.NotNil(t, config.IsOnline)
+							assert.False(t, *config.IsOnline)
 						case 3:
 							assert.False(t, sample.SnapshotApplied)
-							require.NotNil(t, current.IsDegraded)
-							assert.False(t, *current.IsDegraded)
+							require.NotNil(t, config.IsDegraded)
+							assert.False(t, *config.IsDegraded)
 						}
 					}
 					assert.EqualValues(t, 4, calls.Load())
@@ -1337,16 +1352,18 @@ func TestDegradationDatabaseMatrix(t *testing.T) {
 							var captured model.Channel
 							require.NoError(t, db.First(&captured, source.Id).Error)
 							if check.edit {
-								require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("ttft_ms", check.want).Error)
+								cfg := captured.ModelConfig("alias")
+								cfg.TTFTMs = &check.want
+								require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", source.Id).Update("model_configs", model.ChannelModelConfigs{"alias": cfg}).Error)
 							}
 							when := time.Now().UnixMilli()
-							measured := model.ChannelDegradationSample{ID: uuid.NewString(), State: check.state, StartedAt: when, CompletedAt: when, DurationMs: 10, TTFTMs: &check.sampleTTFT}
+							measured := model.ChannelDegradationSample{ID: uuid.NewString(), Model: "alias", State: check.state, StartedAt: when, CompletedAt: when, DurationMs: 10, TTFTMs: &check.sampleTTFT}
 							require.NoError(t, model.RecordChannelDegradation(context.Background(), &captured, &measured, ""))
 							assert.Equal(t, !check.edit, measured.SnapshotApplied)
 							var actual model.Channel
 							require.NoError(t, db.First(&actual, source.Id).Error)
-							require.NotNil(t, actual.TTFTMs)
-							assert.Equal(t, check.want, *actual.TTFTMs)
+							require.NotNil(t, actual.ModelConfig("alias").TTFTMs)
+							assert.Equal(t, check.want, *actual.ModelConfig("alias").TTFTMs)
 							invalid := int64(-1)
 							measured.ID = uuid.NewString()
 							measured.TTFTMs = &invalid

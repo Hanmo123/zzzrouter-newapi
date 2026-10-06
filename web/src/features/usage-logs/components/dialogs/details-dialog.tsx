@@ -240,7 +240,7 @@ function BillingBreakdown(props: {
 
   if (other.channel_public_ratio != null) {
     rows.push({
-      label: t('Channel public multiplier'),
+      label: t('Model charge multiplier'),
       value: `${formatRatio(other.channel_public_ratio)}x`,
     })
   }
@@ -259,6 +259,18 @@ function BillingBreakdown(props: {
     })
   }
 
+  if (isAdmin && other.admin_info?.upstream_discount != null) {
+    rows.push({
+      label: t('Upstream discount'),
+      value: String(other.admin_info.upstream_discount),
+    })
+  }
+  if (isAdmin && other.admin_info?.upstream_cost_quota != null) {
+    rows.push({
+      label: t('Procurement cost'),
+      value: formatLogQuota(other.admin_info.upstream_cost_quota),
+    })
+  }
   if (!isTieredExpr && isClaude && hasAnyCacheTokens(other)) {
     if (other.cache_ratio != null && other.cache_ratio !== 1) {
       rows.push({

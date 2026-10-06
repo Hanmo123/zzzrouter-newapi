@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "Channel models and billing",
+    "Configure model: {{model}}": "Configure model: {{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.",
+    "Upstream discount": "Upstream discount",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Cost = base charge × upstream discount. 0.8 means paying 80%.",
+    "Use model billing expression": "Use model billing expression",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.",
+    "No comparable system token prices. This model is excluded from dispatch.": "No comparable system token prices. This model is excluded from dispatch.",
+    "Public ratio is automatic with an expression.": "Public ratio is automatic with an expression.",
+    "Invalid billing expression": "Invalid billing expression",
+    "Model charge multiplier": "Model charge multiplier",
+    "Procurement cost": "Procurement cost",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.",
     "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.": "Private upstream multiplier used for floor routing and multiplier filters, not customer billing.",
     "Public multiplier applied to customer billing after the group ratio and before the service fee.": "Public multiplier applied to customer billing after the group ratio and before the service fee.",
     "Relay service fee": "Relay service fee",

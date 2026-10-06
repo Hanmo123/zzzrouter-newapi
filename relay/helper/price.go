@@ -75,6 +75,12 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 			fee := operation_setting.GetRelayServiceFee()
 			relayInfo.RelayCharge = &hosttypes.RelayCharge{ServiceFeeEnabled: fee.Enabled, ServiceFeeRate: fee.Rate}
 		}
+		if value, present := ctx.Get("channel_model_config"); present {
+			config := value.(model.ChannelModelConfig)
+			discount := config.Discount()
+			relayInfo.RelayCharge.UpstreamDiscount = &discount
+			relayInfo.RelayCharge.ModelExpression = config.BillingExpression
+		}
 		relayInfo.RelayCharge.BaseGroupRatio = groupRatioInfo.GroupRatio
 		relayInfo.RelayCharge.ChannelPublicRatio = publicRatio
 		groupRatioInfo.GroupRatio = relayInfo.RelayCharge.EffectiveGroupRatio()
@@ -92,26 +98,18 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
-	channel := model.Channel{OtherSettings: c.GetString(model.ChannelPricingSettingsContextKey)}
-	prices, err := channel.GetModelTokenPrices()
-	if err != nil {
-		return hosttypes.PriceData{}, err
+	var config model.ChannelModelConfig
+	if value, ok := c.Get("channel_model_config"); ok {
+		config, _ = value.(model.ChannelModelConfig)
 	}
-	// Match the routed public model, before canonical billing aliases or upstream
-	// mapping. Strip request modifiers only as a fallback, never use upstream IDs.
-	priceModel := info.GetOriginModelName()
-	expr, overridden, err := prices.Expression(priceModel)
-	if !overridden && err == nil {
-		expr, overridden, err = prices.Expression(hostreasoning.BaseModelName(priceModel))
-	}
-	if err != nil {
-		return hosttypes.PriceData{}, err
+	if config.ModelPublicRatio(info.GetOriginModelName()) == nil {
+		return hosttypes.PriceData{}, fmt.Errorf("model %s has no comparable public ratio", info.GetOriginModelName())
 	}
 	info.PricingChannelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
-	info.ChannelTokenPricing = overridden
+	info.ChannelTokenPricing = config.BillingExpression != ""
 	info.TieredBillingSnapshot = nil
-	if overridden {
-		return modelPriceHelperExpression(c, info, priceModel, expr, promptTokens, groupRatioInfo)
+	if info.ChannelTokenPricing {
+		return modelPriceHelperExpression(c, info, info.GetOriginModelName(), config.BillingExpression, promptTokens, groupRatioInfo)
 	}
 
 	// Check if this model uses tiered_expr billing
@@ -307,6 +305,12 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		}
 	}
 
+	info.RelayCharge.CaptureBaseQuota(func() float64 {
+		if usePrice {
+			return modelPrice * common.QuotaPerUnit
+		}
+		return modelRatio / 2 * common.QuotaPerUnit
+	}())
 	priceData := hosttypes.PriceData{
 		FreeModel:      freeModel,
 		ModelPrice:     modelPrice,

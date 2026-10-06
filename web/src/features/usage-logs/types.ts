@@ -121,6 +121,9 @@ export interface LogOtherData {
   service_fee_rate?: number
   service_fee_quota?: number
   admin_info?: {
+    upstream_discount?: number
+    upstream_cost_quota?: number
+    upstream_total_cost_quota?: number
     request_policy?: PolicyEvent[]
     is_multi_key?: boolean
     multi_key_index?: number

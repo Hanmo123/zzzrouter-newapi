@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"math"
 	"strings"
 	"unicode/utf8"
 
@@ -70,15 +69,6 @@ func validateChannelProvider(tx *gorm.DB, channel *Channel, create bool) error {
 			return err
 		}
 		channel.ProviderID = provider.ID
-	}
-	if channel.UpstreamRatio != nil {
-		ratio := *channel.UpstreamRatio
-		if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 {
-			return errors.New("upstream_ratio must be a finite positive number")
-		}
-	} else if create {
-		ratio := 1.0
-		channel.UpstreamRatio = &ratio
 	}
 	if channel.ProviderID == 0 {
 		return nil

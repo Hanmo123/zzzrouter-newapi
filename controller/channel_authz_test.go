@@ -44,14 +44,14 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 		updated.ProviderID = 7
 		ratio := 0.5
-		updated.UpstreamRatio = &ratio
-		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "upstream_ratio": ratio}))
+		updated.ModelConfigs = model.ChannelModelConfigs{"model-a": {UpstreamDiscount: &ratio}}
+		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "model_configs": updated.ModelConfigs}))
 		updated.Key = "new-key"
 		assert.True(t, channelHasSensitiveChanges(&updated, origin, map[string]any{"provider_id": 7, "key": updated.Key}))
 	})
 
 	t.Run("display and observation fields do not require secret access", func(t *testing.T) {
-		for _, field := range []string{"public_ratio", "is_degraded", "is_online", "ttft_ms", "last_checked_at"} {
+		for _, field := range []string{"model_configs", "model_configs_revision"} {
 			assert.False(t, channelHasSensitiveChanges(&PatchChannel{}, origin, map[string]any{field: nil}), field)
 		}
 	})
@@ -217,8 +217,7 @@ func TestChannelProviderFiltering(t *testing.T) {
 				for _, channel := range response.Data.Items {
 					assert.Equal(t, provider.ID, channel.ProviderID)
 					assert.Empty(t, channel.Key)
-					require.NotNil(t, channel.UpstreamRatio)
-					assert.Equal(t, 1.0, *channel.UpstreamRatio)
+					assert.Equal(t, 1.0, channel.ModelConfig("model-a").Discount())
 				}
 			})
 		}
@@ -254,7 +253,7 @@ func TestChannelObservationPatchContract(t *testing.T) {
 		name, fields string
 		success      bool
 	}{
-		{"observed false and zero", `"public_ratio":0.25,"is_degraded":true,"is_online":false,"ttft_ms":0,"last_checked_at":1700000123`, true},
+		{"observed false and zero", `"model_configs":{"model-a":{"public_ratio":0.25,"is_degraded":true,"is_online":false,"ttft_ms":0,"last_checked_at":1700000123}}`, true},
 		{"omitted observations", `"name":"renamed"`, true},
 		{"invalid ratio", `"public_ratio":0`, false},
 		{"null ratio", `"public_ratio":null`, false},
@@ -264,7 +263,7 @@ func TestChannelObservationPatchContract(t *testing.T) {
 		{"invalid boolean", `"is_online":"false"`, false},
 		{"cannot change credentials", `"is_online":true,"key":"forbidden-secret"`, false},
 		{"cannot change status", `"status":1,"is_online":true`, false},
-		{"clear observations", `"is_degraded":null,"is_online":null,"ttft_ms":null,"last_checked_at":null`, true},
+		{"clear observations", `"model_configs":{"model-a":{"public_ratio":0.25,"is_degraded":null,"is_online":null,"ttft_ms":null,"last_checked_at":null}}`, true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -283,27 +282,26 @@ func TestChannelObservationPatchContract(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, channel.Key, loaded.Key)
 			assert.Equal(t, channel.Status, loaded.Status)
-			require.NotNil(t, loaded.PublicRatio)
-			assert.Equal(t, 0.25, *loaded.PublicRatio)
+			config := loaded.ModelConfig("model-a")
+			assert.Equal(t, 0.25, config.ChargeRatio())
 			if scenario.name == "clear observations" {
-				assert.Nil(t, loaded.IsDegraded)
-				assert.Nil(t, loaded.IsOnline)
-				assert.Nil(t, loaded.TTFTMs)
-				assert.Nil(t, loaded.LastCheckedAt)
+				assert.Nil(t, config.IsDegraded)
+				assert.Nil(t, config.IsOnline)
+				assert.Nil(t, config.TTFTMs)
+				assert.Nil(t, config.LastCheckedAt)
 			} else {
-				require.NotNil(t, loaded.IsDegraded)
-				require.NotNil(t, loaded.IsOnline)
-				require.NotNil(t, loaded.TTFTMs)
-				require.NotNil(t, loaded.LastCheckedAt)
-				assert.True(t, *loaded.IsDegraded)
-				assert.False(t, *loaded.IsOnline)
-				assert.Zero(t, *loaded.TTFTMs)
-				assert.EqualValues(t, 1700000123, *loaded.LastCheckedAt)
+				require.NotNil(t, config.IsDegraded)
+				require.NotNil(t, config.IsOnline)
+				require.NotNil(t, config.TTFTMs)
+				require.NotNil(t, config.LastCheckedAt)
+				assert.True(t, *config.IsDegraded)
+				assert.False(t, *config.IsOnline)
+				assert.Zero(t, *config.TTFTMs)
+				assert.EqualValues(t, 1700000123, *config.LastCheckedAt)
 			}
 			if scenario.success {
 				assert.Empty(t, response.Data.Key)
-				assert.Equal(t, loaded.IsOnline, response.Data.IsOnline)
-				assert.Equal(t, loaded.TTFTMs, response.Data.TTFTMs)
+				assert.Equal(t, config, response.Data.ModelConfig("model-a"))
 			}
 		})
 	}
@@ -312,7 +310,7 @@ func TestChannelObservationPatchContract(t *testing.T) {
 func TestCopyChannelResetsObservations(t *testing.T) {
 	setupTaskPluginBindChannelTest(t)
 	ratio, flag, ttft, checked := 0.25, true, int64(12), int64(1700000123)
-	channel := model.Channel{Name: "copy source", Type: 1, Key: "secret-key", Models: "model-a", Group: "default", PublicRatio: &ratio, IsDegraded: &flag, IsOnline: &flag, TTFTMs: &ttft, LastCheckedAt: &checked}
+	channel := model.Channel{Name: "copy source", Type: 1, Key: "secret-key", Models: "model-a", Group: "default", ModelConfigs: model.ChannelModelConfigs{"model-a": {PublicRatio: &ratio, IsDegraded: &flag, IsOnline: &flag, TTFTMs: &ttft, LastCheckedAt: &checked}}}
 	require.NoError(t, channel.Insert())
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -333,12 +331,12 @@ func TestCopyChannelResetsObservations(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEqual(t, channel.Id, clone.Id)
 	assert.Equal(t, channel.ProviderID, clone.ProviderID)
-	assert.Equal(t, channel.PublicRatio, clone.PublicRatio)
+	assert.Equal(t, channel.ModelConfig("model-a").ChargeRatio(), clone.ModelConfig("model-a").ChargeRatio())
 	assert.Equal(t, channel.Key, clone.Key)
-	assert.Nil(t, clone.IsDegraded)
-	assert.Nil(t, clone.IsOnline)
-	assert.Nil(t, clone.TTFTMs)
-	assert.Nil(t, clone.LastCheckedAt)
+	assert.Nil(t, clone.ModelConfig("model-a").IsDegraded)
+	assert.Nil(t, clone.ModelConfig("model-a").IsOnline)
+	assert.Nil(t, clone.ModelConfig("model-a").TTFTMs)
+	assert.Nil(t, clone.ModelConfig("model-a").LastCheckedAt)
 }
 
 func TestChannelStatusValidation(t *testing.T) {

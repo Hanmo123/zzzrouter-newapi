@@ -599,12 +599,12 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 	if ok, _ := appmodel.ChannelSatisfiesFilters(channel, model, service.GetChannelConstraints(c).Filters); !ok {
 		return types.NewErrorWithStatusCode(errors.New("connection channel does not satisfy routing filters; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
-	publicRatio := 1.0
-	if channel.PublicRatio != nil {
-		publicRatio = *channel.PublicRatio
+	modelConfig := channel.ModelConfig(model)
+	if modelConfig.ModelPublicRatio(model) == nil {
+		return types.NewErrorWithStatusCode(errors.New("model pricing cannot be compared; reconnect required"), types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	c.Set("channel_public_ratio", publicRatio)
-	c.Set(appmodel.ChannelPricingSettingsContextKey, channel.OtherSettings)
+	c.Set("channel_model_config", modelConfig)
+	c.Set("channel_public_ratio", modelConfig.ChargeRatio())
 	for key, value := range s.lockedContext {
 		c.Set(string(key), value)
 	}

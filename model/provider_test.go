@@ -88,8 +88,7 @@ func TestProviderDatabaseMatrix(t *testing.T) {
 						loaded, err := GetChannelById(legacy.Id, true)
 						require.NoError(t, err)
 						assert.Equal(t, defaultID, loaded.ProviderID)
-						require.NotNil(t, loaded.UpstreamRatio)
-						assert.Equal(t, 1.0, *loaded.UpstreamRatio)
+						assert.Equal(t, 1.0, loaded.ModelConfig("model-a").Discount())
 						assert.Equal(t, legacy.Key, loaded.Key)
 						assert.Equal(t, legacy.Models, loaded.Models)
 						assert.Equal(t, legacy.ChannelInfo, loaded.ChannelInfo)
@@ -101,13 +100,14 @@ func TestProviderDatabaseMatrix(t *testing.T) {
 					require.NoError(t, other.Save())
 					ratio := 0.8
 					channel := legacy
-					channel.Id, channel.ProviderID, channel.UpstreamRatio = 0, provider.ID, &ratio
+					channel.Id, channel.ProviderID = 0, provider.ID
+					channel.ModelConfigs = ChannelModelConfigs{"model-a": {UpstreamDiscount: &ratio}}
 					require.NoError(t, channel.Insert())
 					assert.Error(t, DeleteProvider(provider.ID), "referenced provider must not be deleted")
 					patch := Channel{Id: channel.Id, Name: "renamed"}
 					require.NoError(t, patch.Update())
 					assert.Equal(t, provider.ID, patch.ProviderID)
-					assert.Equal(t, ratio, *patch.UpstreamRatio)
+					assert.Equal(t, ratio, patch.ModelConfig("model-a").Discount())
 					assert.Equal(t, channel.Key, patch.Key)
 					// Reparenting does not change credentials or multi-key state.
 					patch.ProviderID = other.ID
@@ -120,14 +120,14 @@ func TestProviderDatabaseMatrix(t *testing.T) {
 					patch.ProviderID = -1
 					assert.Error(t, patch.Update())
 					patch.ProviderID = other.ID
-					for _, invalid := range []float64{0, -1, math.NaN(), math.Inf(1)} {
-						patch.UpstreamRatio = &invalid
+					for _, invalid := range []float64{1.1, -1, math.NaN(), math.Inf(1)} {
+						patch.ModelConfigs = ChannelModelConfigs{"model-a": {UpstreamDiscount: &invalid}}
 						assert.Error(t, patch.Update())
 					}
 					loaded, err := GetChannelById(channel.Id, true)
 					require.NoError(t, err)
 					assert.Equal(t, other.ID, loaded.ProviderID)
-					assert.Equal(t, ratio, *loaded.UpstreamRatio)
+					assert.Equal(t, ratio, loaded.ModelConfig("model-a").Discount())
 
 					batch := []Channel{{Name: "single", Key: "key-c", Models: "model-a", Group: "default"}, {Name: "invalid", Key: "key-d", ProviderID: provider.ID}}
 					assert.Error(t, BatchInsertChannels(batch))
@@ -136,11 +136,11 @@ func TestProviderDatabaseMatrix(t *testing.T) {
 					assert.Zero(t, count, "invalid batch must not partially insert channels")
 					require.NoError(t, BatchInsertChannels(batch[:1]))
 					assert.Equal(t, defaultID, batch[0].ProviderID)
-					assert.Equal(t, 1.0, *batch[0].UpstreamRatio)
+					assert.Equal(t, 1.0, batch[0].ModelConfig("model-a").Discount())
 					saved := Channel{Name: "internal-save", Key: "key-e"}
 					require.NoError(t, saved.Save())
 					assert.Equal(t, defaultID, saved.ProviderID)
-					assert.Equal(t, 1.0, *saved.UpstreamRatio)
+					assert.Equal(t, 1.0, saved.ModelConfig("model-a").Discount())
 					saved.ProviderID = provider.ID
 					assert.Error(t, saved.Save(), "full-record saves also reject deleted providers")
 

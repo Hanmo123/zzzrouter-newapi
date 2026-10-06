@@ -17,38 +17,46 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useForm } from 'react-hook-form'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 import { Button } from '@/components/ui/button'
 import { Form } from '@/components/ui/form'
+import { api } from '@/lib/api'
 
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   channelFormSchema,
-  transformChannelToFormDefaults,
   transformFormDataToUpdatePayload,
   type ChannelFormValues,
 } from '../../lib/channel-form'
-import { channelTokenPricesSchema } from '../../lib/channel-token-pricing'
-import { channelSchema } from '../../types'
+import { channelModelConfigsSchema } from '../../lib/channel-token-pricing'
 import { ChannelTokenPricingFields } from '../channel-token-pricing-fields'
 
 function PricingForm(props: {
-  save: (values: ChannelFormValues) => void
-  disabled?: boolean
+  save: (data: ChannelFormValues) => void
   empty?: boolean
+  disabled?: boolean
 }) {
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
     defaultValues: {
       ...CHANNEL_FORM_DEFAULT_VALUES,
       name: 'channel',
-      key: 'private',
+      key: 'key',
       models: props.empty ? '' : 'public.model-a,model-b',
-      model_token_prices: props.empty ? {} : { 'model-b': { p: 5, c: 8 } },
+      model_configs: props.empty
+        ? {}
+        : {
+            'model-b': {
+              upstream_discount: 0.6,
+              public_ratio: 0.8,
+              is_online: false,
+            },
+          },
     },
   })
   return (
@@ -58,192 +66,141 @@ function PricingForm(props: {
           control={form.control}
           disabled={props.disabled}
         />
-        <Button type='submit'>Save prices</Button>
+        <Button type='submit'>Save models</Button>
       </form>
     </Form>
   )
 }
+function renderForm(
+  save = vi.fn(),
+  options: { empty?: boolean; disabled?: boolean } = {}
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <PricingForm save={save} {...options} />
+    </QueryClientProvider>
+  )
+  return save
+}
 
-describe('channel model token prices', () => {
-  it('saves expensive cached input and explicit zero output independently without changing another model', async () => {
-    const save = vi.fn()
-    render(<PricingForm save={save} />)
+describe('channel model configuration', () => {
+  it('edits one model discount, ratio and observations without changing another model', async () => {
+    const save = renderForm()
     const user = userEvent.setup()
     expect(
-      screen.queryByRole('textbox', { name: 'Input price' })
+      screen.queryByRole('spinbutton', { name: 'Public ratio' })
     ).not.toBeInTheDocument()
     await user.click(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
+      screen.getByRole('button', { name: 'Configure model: public.model-a' })
     )
-    fireEvent.change(screen.getByRole('textbox', { name: 'Input price' }), {
-      target: { value: '2' },
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Public ratio' }), {
+      target: { value: '.2' },
     })
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Completion price' }),
+      screen.getByRole('spinbutton', { name: 'Upstream discount' }),
+      { target: { value: '.8' } }
+    )
+    fireEvent.change(
+      screen.getByRole('spinbutton', { name: 'Time to first token (ms)' }),
       { target: { value: '0' } }
     )
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Cache read price' }),
-      { target: { value: '9' } }
+    await user.click(
+      screen.getByRole('combobox', { name: 'Callable (online)' })
     )
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Cache create price' }),
-      { target: { value: '3.75' } }
-    )
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Cache create (1h) price' }),
-      { target: { value: '8' } }
-    )
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
+    await user.click(screen.getByRole('option', { name: 'Online' }))
+    await user.click(screen.getByRole('button', { name: 'Save models' }))
     await waitFor(() => expect(save).toHaveBeenCalled())
-    const payload = transformFormDataToUpdatePayload(save.mock.calls[0][0], 7)
-    expect(JSON.parse(payload.settings ?? '{}')).toMatchObject({
-      model_token_prices: {
-        'public.model-a': { p: 2, c: 0, cr: 9, cc: 3.75, cc1h: 8 },
-        'model-b': { p: 5, c: 8 },
+    const payload = transformFormDataToUpdatePayload(save.mock.calls[0][0], 1)
+    expect(payload.model_configs).toEqual({
+      'public.model-a': {
+        public_ratio: 0.2,
+        upstream_discount: 0.8,
+        ttft_ms: 0,
+        is_online: true,
+      },
+      'model-b': {
+        public_ratio: 0.8,
+        upstream_discount: 0.6,
+        is_online: false,
       },
     })
-    await user.click(screen.getByRole('combobox', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: 'model-b' }))
-    expect(screen.getByRole('textbox', { name: 'Input price' })).toHaveValue(
-      '5'
+    expect(payload).not.toHaveProperty('public_ratio')
+    expect(payload).not.toHaveProperty('upstream_ratio')
+  })
+  it('uses expression preview as a read-only ratio and preserves the full expression', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: { public_ratio: { min: 0.13, max: 0.15 }, schedulable: true },
+      },
+    })
+    const save = renderForm()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Configure model: public.model-a' })
+    )
+    await user.click(
+      screen.getByRole('switch', { name: 'Use model billing expression' })
     )
     expect(
-      screen.getByRole('textbox', { name: 'Completion price' })
-    ).toHaveValue('8')
-  })
-
-  it('clears an optional category and disables one model without deleting other prices', async () => {
-    const save = vi.fn()
-    render(<PricingForm save={save} />)
-    const user = userEvent.setup()
-    await user.click(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
-    )
-    fireEvent.change(screen.getByRole('textbox', { name: 'Input price' }), {
-      target: { value: '0' },
-    })
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Completion price' }),
-      { target: { value: '0' } }
-    )
-    const cache = screen.getByRole('textbox', { name: 'Cache read price' })
-    fireEvent.change(cache, { target: { value: '0' } })
-    await user.clear(cache)
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
+      screen.queryByRole('spinbutton', { name: 'Public ratio' })
+    ).not.toBeInTheDocument()
+    expect(await screen.findByText('0.13x~0.15x')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Save models' }))
     await waitFor(() => expect(save).toHaveBeenCalled())
-    expect(save.mock.calls[0][0].model_token_prices['public.model-a']).toEqual({
-      p: 0,
-      c: 0,
+    expect(save.mock.calls[0][0].model_configs['public.model-a']).toEqual({
+      billing_expression: 'tier("base", p * 0 + c * 0)',
     })
     await user.click(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
+      screen.getByRole('switch', { name: 'Use model billing expression' })
     )
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
-    expect(save.mock.calls[1][0].model_token_prices).toEqual({
-      'model-b': { p: 5, c: 8 },
-    })
-  })
-
-  it('marks missing required or excessive prices invalid and prevents saving', async () => {
-    const save = vi.fn()
-    render(<PricingForm save={save} />)
-    const user = userEvent.setup()
-    await user.click(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
-    )
-    fireEvent.change(
-      screen.getByRole('textbox', { name: 'Completion price' }),
-      { target: { value: '0' } }
-    )
-    const input = screen.getByRole('textbox', { name: 'Input price' })
-    fireEvent.change(input, { target: { value: '0' } })
-    await user.clear(input)
-    expect(input).toHaveAttribute('aria-invalid', 'true')
-    fireEvent.change(input, { target: { value: '1000000001' } })
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
-    expect(input).toHaveAttribute('aria-invalid', 'true')
-    expect(save).not.toHaveBeenCalled()
-    fireEvent.change(input, { target: { value: '1' } })
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
-    await waitFor(() => expect(save).toHaveBeenCalled())
-  })
-
-  it('identifies invalid prices on another model when switching models before saving', async () => {
-    const save = vi.fn()
-    render(<PricingForm save={save} />)
-    const user = userEvent.setup()
-    await user.click(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
-    )
-    await user.click(screen.getByRole('combobox', { name: 'Model' }))
-    await user.click(screen.getByRole('option', { name: 'model-b' }))
-    await user.click(screen.getByRole('button', { name: 'Save prices' }))
-    expect(save).not.toHaveBeenCalled()
     expect(
-      screen.getByText(/Token prices must be between.*public\.model-a/)
+      screen.getByRole('spinbutton', { name: 'Public ratio' })
+    ).toHaveValue(1)
+  })
+  it('reports uncomparable pricing and server validation failures without inventing a ratio', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: { success: true, data: { public_ratio: null, schedulable: false } },
+    })
+    renderForm()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Configure model: public.model-a' })
+    )
+    await user.click(
+      screen.getByRole('switch', { name: 'Use model billing expression' })
+    )
+    expect(
+      await screen.findByText(
+        'No comparable system token prices. This model is excluded from dispatch.'
+      )
     ).toBeVisible()
   })
-
-  it('keeps price controls read-only without sensitive channel write permission', async () => {
-    render(<PricingForm save={vi.fn()} disabled />)
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeDisabled()
-    expect(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
-    ).toHaveAttribute('aria-disabled', 'true')
-  })
-
-  it('disables overrides when no channel models or saved prices exist', () => {
-    render(<PricingForm save={vi.fn()} empty />)
-    expect(screen.getByRole('combobox', { name: 'Model' })).toBeDisabled()
-    expect(
-      screen.getByRole('switch', { name: 'Override system model pricing' })
-    ).toHaveAttribute('aria-disabled', 'true')
-    expect(
-      screen.queryByRole('textbox', { name: 'Input price' })
-    ).not.toBeInTheDocument()
-  })
-
-  it('round-trips saved model names with dots and preserves unrelated channel settings', () => {
-    const channel = channelSchema.parse({
-      id: 7,
-      type: 1,
-      name: 'channel',
-      key: '',
-      created_time: 0,
-      test_time: 0,
-      response_time: 0,
-      balance_updated_time: 0,
-      models: 'public.model-a',
-      group: 'default',
-      status: 1,
-      channel_info: {},
-      settings: JSON.stringify({
-        allow_service_tier: true,
-        model_token_prices: { 'public.model-a': { p: 2, c: 0, cr: 9 } },
-      }),
-    })
-    const defaults = transformChannelToFormDefaults(channel)
-    expect(defaults.model_token_prices).toEqual({
-      'public.model-a': { p: 2, c: 0, cr: 9 },
-    })
-    expect(
-      JSON.parse(transformFormDataToUpdatePayload(defaults, 7).settings ?? '{}')
-    ).toMatchObject({
-      allow_service_tier: true,
-      model_token_prices: defaults.model_token_prices,
-    })
-    for (const invalid of [
-      { p: -1, c: 2 },
-      { p: Infinity, c: 2 },
-      { p: 1 },
-      { p: 1, c: 2, cr: null },
-      { p: 1, c: 2, unknown: 1 },
+  it('rejects mixed manual/expression pricing, invalid discounts and invalid expressions', () => {
+    for (const cfg of [
+      { upstream_discount: 1.1 },
+      { upstream_discount: -1 },
+      { public_ratio: -1 },
+      { billing_expression: 'tier("x",p)', public_ratio: 1 },
+      { billing_expression: 'tier(' },
+      { ttft_ms: -1 },
     ]) {
-      expect(channelTokenPricesSchema.safeParse({ m: invalid }).success).toBe(
+      expect(channelModelConfigsSchema.safeParse({ m: cfg }).success).toBe(
         false
       )
     }
+    expect(
+      channelModelConfigsSchema.safeParse({
+        m: { public_ratio: 0, upstream_discount: 0, ttft_ms: 0 },
+      }).success
+    ).toBe(true)
+  })
+  it('provides search and an empty state without channel-level price inputs', () => {
+    renderForm(vi.fn(), { empty: true })
+    expect(screen.getByText('No models')).toBeVisible()
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
   })
 })

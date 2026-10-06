@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "Mô hình và tính phí của kênh",
+    "Configure model: {{model}}": "Cấu hình mô hình: {{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "Cấu hình giá và dữ liệu quan sát riêng cho từng mô hình công khai. Hệ số nhóm được áp dụng cuối cùng cho phí người dùng; chi phí mua không bao gồm phí dịch vụ và hệ số nhóm.",
+    "Upstream discount": "Hệ số giá mua thượng nguồn",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Chi phí mua = phí cơ sở × hệ số giá mua. 0,8 nghĩa là trả 80%.",
+    "Use model billing expression": "Dùng biểu thức tính phí mô hình",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Hệ số công khai được tính từ giá token ở bậc cơ sở và không nhân lại vào phí của biểu thức.",
+    "No comparable system token prices. This model is excluded from dispatch.": "Không thể so sánh với giá token hệ thống. Mô hình này bị loại khỏi định tuyến.",
+    "Public ratio is automatic with an expression.": "Hệ số công khai được tính tự động khi dùng biểu thức.",
+    "Invalid billing expression": "Biểu thức tính phí không hợp lệ",
+    "Model charge multiplier": "Hệ số tính phí mô hình",
+    "Procurement cost": "Chi phí mua",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "Phí cuối cùng = phí cơ sở mô hình × (1 + tỷ lệ phí dịch vụ) × hệ số nhóm. Chi phí mua = phí cơ sở mô hình × hệ số giá mua.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

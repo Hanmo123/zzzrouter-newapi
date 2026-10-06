@@ -33,7 +33,7 @@ func GetFloorChannel(group, modelName string, filters []dto.ChannelFilter) (*Cha
 		}
 	} else {
 		for _, name := range names {
-			ids := DB.Model(&Ability{}).Select("channel_id").Where(commonGroupCol+" = ? AND model = ? AND enabled = ?", group, name, true)
+			ids := DB.Model(&Ability{}).Select("channel_id").Where(map[string]any{"group": group, "model": name, "enabled": true})
 			var channels []*Channel
 			if err := DB.Where("id IN (?) AND status = ?", ids, common.ChannelStatusEnabled).Find(&channels).Error; err != nil {
 				return nil, err
@@ -48,22 +48,19 @@ func GetFloorChannel(group, modelName string, filters []dto.ChannelFilter) (*Cha
 			}
 		}
 	}
-	return chooseFloorChannel(candidates), nil
+	return chooseFloorModelChannel(candidates, modelName), nil
 }
 
-func chooseFloorChannel(candidates []*Channel) *Channel {
-	floor := math.Inf(1)
+func chooseFloorModelChannel(candidates []*Channel, modelName string) *Channel {
+	floor, lower := math.Inf(1), math.Inf(1)
 	var tier []*Channel
 	for _, ch := range candidates {
-		if ch.UpstreamRatio == nil {
+		quoted := ch.ModelConfig(modelName).ModelPublicRatio(modelName)
+		if quoted == nil || quoted.Max > floor || (quoted.Max == floor && quoted.Min > lower) {
 			continue
 		}
-		cost := *ch.UpstreamRatio
-		if cost <= 0 || math.IsNaN(cost) || math.IsInf(cost, 0) || cost > floor {
-			continue
-		}
-		if cost < floor {
-			floor = cost
+		if quoted.Max < floor || quoted.Min < lower {
+			floor, lower = quoted.Max, quoted.Min
 			tier = nil
 		}
 		tier = append(tier, ch)

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-import type { ChannelTokenPrices } from './lib/channel-token-pricing'
+import { channelModelConfigsSchema } from './lib/channel-token-pricing'
 
 // ============================================================================
 // Channel Schema & Types
@@ -39,12 +39,14 @@ export type ChannelInfo = z.infer<typeof channelInfoSchema>
 export const channelSchema = z.object({
   id: z.number(),
   provider_id: z.number().optional(),
-  upstream_ratio: z.number().optional(),
-  public_ratio: z.number().optional(),
-  is_degraded: z.boolean().nullish(),
-  is_online: z.boolean().nullish(),
-  ttft_ms: z.number().nullish(),
-  last_checked_at: z.number().nullish(),
+  model_configs_revision: z.string().nullish(),
+  model_configs: channelModelConfigsSchema.nullish(),
+  model_ratios: z
+    .record(
+      z.string(),
+      z.object({ min: z.number(), max: z.number() }).nullable()
+    )
+    .optional(),
   type: z.number(),
   key: z.string(),
   openai_organization: z.string().nullish(),
@@ -103,7 +105,6 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
-  model_token_prices?: ChannelTokenPrices
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean

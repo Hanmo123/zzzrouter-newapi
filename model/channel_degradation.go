@@ -87,8 +87,7 @@ func channelDegradationInputs(channel *Channel) []any {
 	return []any{channel.InstanceID, channel.Type, channel.ProviderID, channel.Key, channel.BaseURL,
 		channel.Models, channel.ModelMapping, channel.TestModel, channel.OpenAIOrganization,
 		channel.Setting, channel.OtherSettings, channel.ParamOverride, channel.HeaderOverride,
-		channel.ChannelInfo.IsMultiKey, channel.ChannelInfo.MultiKeyStatusList, channel.SkipDegradationCheck,
-		channel.IsOnline, channel.IsDegraded, channel.LastCheckedAt, channel.TTFTMs}
+		channel.ChannelInfo.IsMultiKey, channel.ChannelInfo.MultiKeyStatusList, channel.SkipDegradationCheck}
 }
 
 func prepareChannelDegradationSample(source *Channel, sample *ChannelDegradationSample) error {
@@ -151,18 +150,24 @@ func RecordChannelDegradation(ctx context.Context, source *Channel, sample *Chan
 			// an offline snapshot as if an upstream measurement had failed.
 			unchanged = false
 		}
-		if unchanged && !(len(historyOnly) > 0 && historyOnly[0]) && (current.LastCheckedAt == nil || *current.LastCheckedAt <= sample.StartedAt/1000) {
+		config := current.ModelConfig(sample.Model)
+		unchanged = unchanged && reflect.DeepEqual(source.ModelConfig(sample.Model), config)
+		if unchanged && !(len(historyOnly) > 0 && historyOnly[0]) && (config.LastCheckedAt == nil || *config.LastCheckedAt <= sample.StartedAt/1000) {
 			var degraded *bool
 			online := sample.State != "error"
 			if online {
 				value := sample.State == "abnormal"
 				degraded = &value
 			}
-			updates := map[string]any{"is_degraded": degraded, "is_online": online, "last_checked_at": sample.CompletedAt / 1000}
+			config.IsDegraded, config.IsOnline, config.LastCheckedAt = degraded, &online, common.GetPointer(sample.CompletedAt/1000)
 			if online && sample.TTFTMs != nil {
-				updates["ttft_ms"] = *sample.TTFTMs
+				config.TTFTMs = sample.TTFTMs
 			}
-			if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Updates(updates).Error; err != nil {
+			if current.ModelConfigs == nil {
+				current.ModelConfigs = make(ChannelModelConfigs)
+			}
+			current.ModelConfigs[sample.Model] = config
+			if err := tx.Model(&Channel{}).Where("id = ?", source.Id).Update("model_configs", current.ModelConfigs).Error; err != nil {
 				return err
 			}
 			sample.SnapshotApplied = true

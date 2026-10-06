@@ -207,7 +207,6 @@ import {
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
 import { ChannelDegradationExclusion } from '../channel-degradation-exclusion'
-import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelQuickOptions } from '../channel-quick-options'
@@ -1059,7 +1058,22 @@ export function ChannelMutateDrawer({
         return
       }
       const defaults = transformChannelToFormDefaults(channelData.data)
-      if (isCopying) defaults.name = `${defaults.name}_copy`
+      if (isCopying) {
+        defaults.name = `${defaults.name}_copy`
+        defaults.model_configs_revision = undefined
+        defaults.model_configs = Object.fromEntries(
+          Object.entries(defaults.model_configs ?? {}).map(([name, config]) => [
+            name,
+            {
+              ...config,
+              is_online: null,
+              is_degraded: null,
+              ttft_ms: null,
+              last_checked_at: null,
+            },
+          ])
+        )
+      }
       form.reset(defaults)
       loadedForm.current = {
         channelId: channelData.data.id,
@@ -2587,13 +2601,10 @@ export function ChannelMutateDrawer({
         </div>
 
         <ChannelProviderFields control={form.control} />
-        <ChannelObservationFields control={form.control} />
-        {currentType !== CHANNEL_TYPE_TASK_PLUGIN && (
-          <ChannelTokenPricingFields
-            control={form.control}
-            disabled={sensitiveLocked}
-          />
-        )}
+        <ChannelTokenPricingFields
+          control={form.control}
+          saved={channelData?.data}
+        />
         {isEditing && channelId != null && (
           <ChannelDegradationExclusion
             channelId={channelId}

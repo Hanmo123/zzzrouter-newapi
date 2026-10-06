@@ -41,10 +41,7 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 import { readTaskExtendPluginKeys } from './channel-plugin-extensions'
-import {
-  channelTokenPricesSchema,
-  type ChannelTokenPrices,
-} from './channel-token-pricing'
+import { channelModelConfigsSchema } from './channel-token-pricing'
 
 // ============================================================================
 // Form Validation Schema
@@ -209,28 +206,8 @@ export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
     provider_id: z.number().int().positive().optional(),
-    public_ratio: z
-      .number({ error: 'Public ratio must be greater than zero' })
-      .positive('Public ratio must be greater than zero')
-      .optional(),
-    is_degraded: z.boolean().nullish(),
-    is_online: z.boolean().nullish(),
-    ttft_ms: z
-      .number({ error: 'TTFT must be a non-negative integer in milliseconds' })
-      .int('TTFT must be a non-negative integer in milliseconds')
-      .nonnegative('TTFT must be a non-negative integer in milliseconds')
-      .nullish(),
-    last_checked_at: z
-      .number({ error: 'Invalid last checked time' })
-      .int('Invalid last checked time')
-      .min(0, 'Invalid last checked time')
-      .max(253402300799, 'Invalid last checked time')
-      .nullish(),
-    upstream_ratio: z
-      .number({ error: 'Upstream ratio must be greater than zero' })
-      .finite('Upstream ratio must be greater than zero')
-      .positive('Upstream ratio must be greater than zero')
-      .optional(),
+    model_configs: channelModelConfigsSchema.optional(),
+    model_configs_revision: z.string().optional(),
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
     base_url: z.string().optional(),
     task_plugin_key: z.string().optional(),
@@ -279,7 +256,7 @@ export const channelFormSchema = z
       .string()
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
-    model_token_prices: channelTokenPricesSchema.optional(),
+
     advanced_custom: z.string().optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
@@ -456,12 +433,7 @@ export type ChannelFormValues = z.infer<typeof channelFormSchema>
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   provider_id: undefined,
-  upstream_ratio: 1,
-  public_ratio: 1,
-  is_degraded: null,
-  is_online: null,
-  ttft_ms: null,
-  last_checked_at: null,
+  model_configs: {},
   type: 1,
   base_url: '',
   task_plugin_key: '',
@@ -483,7 +455,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   param_override: '',
   header_override: '',
   settings: '{}',
-  model_token_prices: {},
+
   other: '',
   multi_key_mode: 'single',
   multi_key_type: 'random',
@@ -590,12 +562,11 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
-  let modelTokenPrices: ChannelTokenPrices = {}
 
   if (channel.settings) {
     try {
       const parsed = JSON.parse(channel.settings)
-      modelTokenPrices = parsed.model_token_prices ?? {}
+
       vertexKeyType = parsed.vertex_key_type || 'json'
       azureResponsesVersion = parsed.azure_responses_version || ''
       isEnterpriseAccount = parsed.openrouter_enterprise === true
@@ -630,12 +601,8 @@ export function transformChannelToFormDefaults(
   return {
     name: channel.name || '',
     provider_id: channel.provider_id || undefined,
-    upstream_ratio: channel.upstream_ratio ?? 1,
-    public_ratio: channel.public_ratio ?? 1,
-    is_degraded: channel.is_degraded ?? null,
-    is_online: channel.is_online ?? null,
-    ttft_ms: channel.ttft_ms ?? null,
-    last_checked_at: channel.last_checked_at ?? null,
+    model_configs: channel.model_configs ?? {},
+    model_configs_revision: channel.model_configs_revision ?? undefined,
     type: channel.type,
     base_url: channel.base_url || '',
     key: '', // Never populate key from backend for security
@@ -655,7 +622,7 @@ export function transformChannelToFormDefaults(
     param_override: channel.param_override || '',
     header_override: channel.header_override || '',
     settings: channel.settings || '{}',
-    model_token_prices: modelTokenPrices,
+
     other: channel.other || '',
     multi_key_mode: 'single',
     multi_key_type: channel.channel_info.multi_key_mode || 'random',
@@ -868,9 +835,7 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.advanced_custom
   }
 
-  if (formData.model_token_prices !== undefined) {
-    settingsObj.model_token_prices = formData.model_token_prices
-  }
+  delete settingsObj.model_token_prices
   return JSON.stringify(settingsObj)
 }
 
@@ -894,12 +859,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
   const channel: Partial<Channel> = {
     name: formData.name,
     provider_id: formData.provider_id,
-    upstream_ratio: formData.upstream_ratio ?? 1,
-    public_ratio: formData.public_ratio ?? 1,
-    is_degraded: formData.is_degraded,
-    is_online: formData.is_online,
-    ttft_ms: formData.ttft_ms,
-    last_checked_at: formData.last_checked_at,
+    model_configs: formData.model_configs ?? {},
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,
     key: formData.key,
@@ -948,13 +908,9 @@ export function transformFormDataToUpdatePayload(
 ): Partial<Channel> {
   const payload: Partial<Channel> = {
     id: channelId,
+    model_configs_revision: formData.model_configs_revision,
     provider_id: formData.provider_id,
-    upstream_ratio: formData.upstream_ratio ?? 1,
-    public_ratio: formData.public_ratio ?? 1,
-    is_degraded: formData.is_degraded,
-    is_online: formData.is_online,
-    ttft_ms: formData.ttft_ms,
-    last_checked_at: formData.last_checked_at,
+    model_configs: formData.model_configs ?? {},
     name: formData.name,
     type: formData.type,
     base_url: normalizeBaseUrl(formData.base_url) || null,

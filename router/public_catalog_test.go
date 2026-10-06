@@ -44,7 +44,7 @@ func requestPublicCatalog(t *testing.T, engine *gin.Engine, path string) (*httpt
 	var reply publicCatalogReply
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply), recorder.Body.String())
 	// Canary values come from private fields on the actual database records.
-	for _, secret := range []string{"upstream_ratio", "92837.625", "private-key-canary", "private-provider-description", "private-code", "private.example", "private-setting-canary", "private-remark-canary", "private-group"} {
+	for _, secret := range []string{"upstream_discount", "billing_expression", "92837.625", "private-key-canary", "private-provider-description", "private-code", "private.example", "private-setting-canary", "private-remark-canary", "private-group"} {
 		assert.NotContains(t, recorder.Body.String(), secret)
 	}
 	return recorder, reply
@@ -141,7 +141,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				{13, 104, 1, 0.03, &yes, &no, &fast},
 				{14, 999999, 1, 0.04, &yes, &no, &fast},
 			} {
-				channel := model.Channel{Id: row.id, ProviderID: row.provider, Status: row.status, Type: 1, Name: fmt.Sprintf("Channel %d", row.id), Models: "model-a,model-b", Group: "private-group", Key: "private-key-canary", PublicRatio: &row.ratio, UpstreamRatio: &privateRatio, IsOnline: row.online, IsDegraded: row.degraded, TTFTMs: row.ttft, LastCheckedAt: &checked, BaseURL: &baseURL, Setting: &channelSetting, Remark: &remark}
+				channel := model.Channel{Id: row.id, ProviderID: row.provider, Status: row.status, Type: 1, Name: fmt.Sprintf("Channel %d", row.id), Models: "model-a,model-b", Group: "private-group", Key: "private-key-canary", ModelConfigs: model.ChannelModelConfigs{"model-a": {PublicRatio: &row.ratio, UpstreamDiscount: &privateRatio, IsOnline: row.online, IsDegraded: row.degraded, TTFTMs: row.ttft, LastCheckedAt: &checked}, "model-b": {PublicRatio: &row.ratio, UpstreamDiscount: &privateRatio, IsOnline: row.online, IsDegraded: row.degraded, TTFTMs: row.ttft, LastCheckedAt: &checked}}, BaseURL: &baseURL, Setting: &channelSetting, Remark: &remark}
 				// Deliberately include legacy orphan/soft-deleted-provider rows to
 				// verify public visibility, bypassing normal association validation.
 				require.NoError(t, db.Create(&channel).Error)
@@ -254,7 +254,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					{"/api/public/channels?sort_by=public_ratio&sort_order=desc", []int{5, 4, 2, 3, 1}, 5, 1, 20},
 					{"/api/public/channels?sort_by=ttft", []int{2, 1, 3, 5, 4}, 5, 1, 20},
 					{"/api/public/channels?sort_by=ttft_ms&sort_order=DESC", []int{5, 1, 3, 2, 4}, 5, 1, 20},
-					{"/api/public/channels?p=2&page_size=2", []int{3, 4}, 5, 2, 2},
+					{"/api/public/channels?p=2&page_size=2", []int{2}, 5, 2, 2},
 					{"/api/public/channels?p=10&page_size=2", []int{}, 5, 10, 2},
 					{"/api/public/channels?is_online=false", []int{7}, 1, 1, 20},
 					{"/api/public/channels?is_degraded=true", []int{6}, 1, 1, 20},
@@ -275,7 +275,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 						require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 						require.True(t, reply.Success, reply.Message)
 						assert.Contains(t, recorder.Header().Get("Cache-Control"), "no-store")
-						assert.Equal(t, scenario.total, reply.Data.Total)
+						assert.Equal(t, scenario.total*2, reply.Data.Total)
 						assert.Equal(t, scenario.page, reply.Data.Page)
 						assert.Equal(t, scenario.size, reply.Data.PageSize)
 						ids := make([]int, 0, len(reply.Data.Items))
@@ -285,11 +285,11 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 							for key := range item {
 								keys = append(keys, key)
 							}
-							assert.ElementsMatch(t, []string{"id", "provider_id", "provider_name", "name", "type", "models", "public_ratio", "is_degraded", "is_online", "ttft_ms", "last_checked_at"}, keys, "the public response is an allowlist, not an admin channel")
-							assert.Equal(t, "model-a,model-b", item["models"])
+							assert.ElementsMatch(t, []string{"id", "provider_id", "provider_name", "name", "type", "model", "public_ratio", "is_degraded", "is_online", "ttft_ms", "last_checked_at"}, keys, "the public response is an allowlist, not an admin channel")
+							assert.Contains(t, []string{"model-a", "model-b"}, item["model"])
 							assert.EqualValues(t, checked, item["last_checked_at"])
 							if item["id"] == float64(1) {
-								assert.EqualValues(t, 0.5, item["public_ratio"])
+								assert.Equal(t, map[string]any{"min": 0.5, "max": 0.5}, item["public_ratio"])
 								assert.Equal(t, "Channel 1", item["name"])
 							}
 							if item["id"] == float64(2) {
@@ -312,7 +312,11 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 								assert.Nil(t, item["ttft_ms"])
 							}
 						}
-						assert.Equal(t, scenario.ids, ids)
+						expected := make([]int, 0, len(scenario.ids)*2)
+						for _, id := range scenario.ids {
+							expected = append(expected, id, id)
+						}
+						assert.Equal(t, expected, ids)
 						if len(scenario.ids) == 0 {
 							assert.Contains(t, recorder.Body.String(), `"items":[]`)
 						}
@@ -355,7 +359,12 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			t.Run("exact model filters paginate on the server and list all visible options", func(t *testing.T) {
 				changes := map[int]string{1: "model-a, model-b", 2: "model-b", 3: "model-c,modela", 4: "model-ab,model a", 5: "m_%, model-a"}
 				for id, names := range changes {
-					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", id).Update("models", names).Error)
+					var source model.Channel
+					require.NoError(t, db.First(&source, id).Error)
+					for _, name := range strings.Split(names, ",") {
+						source.ModelConfigs[strings.TrimSpace(name)] = source.ModelConfig("model-a")
+					}
+					require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", id).Updates(map[string]any{"models": names, "model_configs": source.ModelConfigs}).Error)
 				}
 				t.Cleanup(func() {
 					for id := range changes {

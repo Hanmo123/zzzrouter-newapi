@@ -19,7 +19,7 @@ type MultiplierFilter struct {
 }
 
 func (f MultiplierFilter) Matches(value float64) bool {
-	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 		return false
 	}
 	switch f.Operator {

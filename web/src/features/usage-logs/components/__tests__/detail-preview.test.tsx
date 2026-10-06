@@ -22,7 +22,14 @@ import {
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
 import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -36,6 +43,7 @@ import {
 import type { UsageLog } from '../../data/schema'
 import type { LogOtherData } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
+import { DetailsDialog } from '../dialogs/details-dialog'
 
 vi.mock('@lobehub/icons', () => ({}))
 vi.hoisted(() => {
@@ -94,8 +102,9 @@ const plugin = {
 }
 const previousConfig = useSystemConfigStore.getState().config
 let client: QueryClient
-const i18n = createInstance()
+let i18n: ReturnType<typeof createInstance>
 beforeEach(async () => {
+  i18n = createInstance()
   await i18n.init({
     lng: 'en',
     // The test switches locale for metadata unit labels, without a network
@@ -290,7 +299,7 @@ test.each([
   }
 )
 
-test('task log prices use localized unit labels from pricing metadata', async () => {
+test('task log prices use localized unit labels from pricing metadata', () => {
   client.setQueryData(['pricing'], {
     data: [
       {
@@ -313,13 +322,49 @@ test('task log prices use localized unit labels from pricing metadata', async ()
     matched_tier: 'images',
   })
   expect(preview).toHaveTextContent('images · images $0.25/image')
-  await act(async () => {
-    await i18n.changeLanguage('zh-CN')
+  act(() => {
+    void i18n.changeLanguage('zh-CN')
   })
   expect(
     screen.getByRole('button', { name: /images · images/ })
   ).toHaveTextContent('images · images $0.25/张')
 })
+
+test.each([false, true])(
+  'procurement data is visible only to administrators (admin=%s)',
+  async (isAdmin) => {
+    render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={client}>
+          <DetailsDialog
+            log={makeLog({
+              model_price: 0.25,
+              admin_info: {
+                upstream_discount: 0.8,
+                upstream_cost_quota: 100000,
+              },
+            })}
+            isAdmin={isAdmin}
+            isRoot={false}
+            open
+            onOpenChange={() => {}}
+          />
+        </QueryClientProvider>
+      </I18nextProvider>
+    )
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      const dialog = within(screen.getByRole('dialog'))
+      if (isAdmin) {
+        expect(dialog.getByText('Procurement cost')).toBeVisible()
+        expect(dialog.getByText('Upstream discount')).toBeVisible()
+      } else {
+        expect(dialog.queryByText('Procurement cost')).not.toBeInTheDocument()
+        expect(dialog.queryByText('Upstream discount')).not.toBeInTheDocument()
+      }
+    })
+  }
+)
 
 test('task log prices select the executing provider’s schema', () => {
   client.setQueryData(['pricing'], {

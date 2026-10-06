@@ -248,6 +248,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	info.TieredBillingSnapshot = nil
+	if raw, exists := c.Get("channel_model_config"); exists {
+		if cfg, ok := raw.(model.ChannelModelConfig); ok && cfg.BillingExpression != "" {
+			return nil, service.TaskErrorWrapper(fmt.Errorf("token billing expressions cannot price task usage"), "model_price_error", http.StatusBadRequest)
+		}
+	}
 	var priceData types.PriceData
 	var err error
 	pluginKey := c.GetString("task_plugin_key")
@@ -290,6 +296,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest)
 		}
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
+		info.RelayCharge.CaptureBaseQuota(cost * common.QuotaPerUnit)
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		noteTaskQuotaClamp(info, clamp)
 		priceData = types.PriceData{Quota: quota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
@@ -381,6 +388,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				logger.LogWarn(c, fmt.Sprintf("task immediate usage settlement failed; retaining reserved quota: %v", err))
 			} else {
 				finalQuota = settlement.ActualQuotaAfterGroup
+				info.RelayCharge.CaptureBaseQuota(settlement.ActualQuotaBeforeGroup)
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
 				noteTaskQuotaClamp(info, settlement.Clamp)
@@ -397,6 +405,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
+	if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusFailure {
+		info.RelayCharge.CaptureBaseQuota(0)
+	} else if info.TieredBillingSnapshot == nil {
+		base := info.PriceData.ModelPrice * common.QuotaPerUnit
+		if !info.PriceData.UsePrice {
+			base = info.PriceData.ModelRatio / 2 * common.QuotaPerUnit
+		}
+		if !common.StringsContains(constant.TaskPricePatches, modelName) {
+			base = info.PriceData.ApplyOtherRatiosToFloat(base)
+		}
+		info.RelayCharge.CaptureBaseQuota(base)
+	}
 	info.PriceData.Quota = finalQuota
 
 	return &TaskSubmitResult{

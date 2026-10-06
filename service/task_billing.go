@@ -262,7 +262,11 @@ func taskModelName(task *model.Task) string {
 // 返回资金来源是否已成功退还；失败时保留 quota，供显式重试或人工对账。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool {
 	quota := task.Quota
-	if quota == 0 {
+	var procurement int
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil {
+		procurement, _ = bc.RelayCharge.CostQuota()
+	}
+	if quota == 0 && procurement == 0 {
 		return true
 	}
 
@@ -283,6 +287,11 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil && bc.RelayCharge.BaseQuota != nil {
+		other.SetAdmin("upstream_cost_quota", -procurement)
+		other.SetAdmin("upstream_total_cost_quota", 0)
+		bc.RelayCharge.CaptureBaseQuota(0)
+	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
@@ -298,7 +307,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 5. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
 	task.Quota = 0
-	if err := task.UpdateQuota(); err != nil {
+	if err := task.UpdateBillingQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 	return true
@@ -309,13 +318,38 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuota(ctx, task, actualQuota, nil, reason, clamps...)
+}
+
+// RecalculateTaskQuotaWithBase settles private cost from an independently
+// measured base, including when the customer's group makes the charge zero.
+func RecalculateTaskQuotaWithBase(ctx context.Context, task *model.Task, actualQuota int, base float64, reason string, clamps ...*common.QuotaClamp) {
+	recalculateTaskQuota(ctx, task, actualQuota, &base, reason, clamps...)
+}
+
+func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, base *float64, reason string, clamps ...*common.QuotaClamp) {
 	if actualQuota < 0 {
 		return
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
+	var charge *types.RelayCharge
+	var previousCost, actualCost int
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.RelayCharge != nil {
+		copy := *bc.RelayCharge
+		charge = &copy
+		previousCost, _ = charge.CostQuota()
+		if base != nil {
+			charge.CaptureBaseQuota(*base)
+		} else if quotaDelta != 0 {
+			// An adaptor supplying only a customer quota has no independent
+			// procurement measurement. Do not label an estimate as actual cost.
+			charge.BaseQuota = nil
+		}
+		actualCost, _ = charge.CostQuota()
+	}
 
-	if quotaDelta == 0 {
+	if quotaDelta == 0 && actualCost == previousCost {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
 			task.TaskID, logger.LogQuota(actualQuota), reason))
 		return
@@ -338,8 +372,11 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	// 调整令牌额度
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
+	if charge != nil {
+		task.PrivateData.BillingContext.RelayCharge = charge
+	}
 	task.Quota = actualQuota
-	if err := task.UpdateQuota(); err != nil {
+	if err := task.UpdateBillingQuota(); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 
@@ -357,6 +394,10 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logQuota = -quotaDelta
 	}
 	other := taskBillingOther(task)
+	if charge != nil && charge.BaseQuota != nil {
+		other.SetAdmin("upstream_cost_quota", actualCost-previousCost)
+		other.SetAdmin("upstream_total_cost_quota", actualCost)
+	}
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("pre_consumed_quota", preConsumedQuota)
 	other.SetPublic("actual_quota", actualQuota)
@@ -440,7 +481,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
+	RecalculateTaskQuotaWithBase(ctx, task, actualQuota, float64(totalTokens)*modelRatio*otherMultiplier, reason, clamp)
 	return true
 }
 

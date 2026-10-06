@@ -26,7 +26,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useForm } from 'react-hook-form'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -45,7 +45,6 @@ import {
   transformFormDataToUpdatePayload,
 } from '../../lib/channel-form'
 import { channelSchema } from '../../types'
-import { ChannelObservationFields } from '../channel-observation-fields'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelsProvider } from '../channels-provider'
 import { ChannelsTable } from '../channels-table'
@@ -59,14 +58,12 @@ function ChannelForm(props: { onSave: (data: unknown) => void }) {
       models: 'model-a',
       key: 'key-one\nkey-two',
       provider_id: 2,
-      upstream_ratio: 0.75,
     },
   })
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(props.onSave)}>
         <ChannelProviderFields control={form.control} />
-        <ChannelObservationFields control={form.control} />
         <Button type='submit'>Save channel</Button>
       </form>
     </Form>
@@ -102,63 +99,20 @@ afterEach(() => {
 })
 
 describe('channel provider configuration', () => {
-  it('edits tri-state observations, preserves zero TTFT, and clears unknown measurements', async () => {
+  it('keeps channel identity fields separate from model observations', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: { items: [first], total: 1 } },
     })
-    const save = await renderFields()
-    const user = userEvent.setup()
-    const ratio = screen.getByRole('spinbutton', { name: 'Public ratio' })
-    await user.clear(ratio)
-    await user.type(ratio, '0')
-    await user.click(screen.getByRole('button', { name: 'Save channel' }))
+    await renderFields()
     expect(
-      await screen.findByText('Public ratio must be greater than zero')
+      await screen.findByRole('combobox', { name: 'Provider' })
     ).toBeVisible()
-    expect(save).not.toHaveBeenCalled()
-    await user.clear(ratio)
-    await user.type(ratio, '0.0125')
-    const online = screen.getByRole('combobox', { name: 'Callable (online)' })
-    expect(online).toHaveValue('Unknown')
-    await user.click(online)
-    await user.click(screen.getByRole('option', { name: 'Offline' }))
-    await user.click(screen.getByRole('combobox', { name: 'Is degraded' }))
-    await user.click(screen.getByRole('option', { name: 'Not degraded' }))
-    const ttft = screen.getByRole('spinbutton', {
-      name: 'Time to first token (ms)',
-    })
-    await user.type(ttft, '0')
-    const checked = screen.getByLabelText('Last checked')
-    fireEvent.change(checked, { target: { value: '2026-09-24T12:34:56' } })
-    await user.click(screen.getByRole('button', { name: 'Save channel' }))
-    await waitFor(() =>
-      expect(save).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          public_ratio: 0.0125,
-          is_online: false,
-          is_degraded: false,
-          ttft_ms: 0,
-          last_checked_at: new Date('2026-09-24T12:34:56').getTime() / 1000,
-        }),
-        expect.anything()
-      )
-    )
-    await user.clear(ttft)
-    fireEvent.change(checked, { target: { value: '' } })
-    await user.click(online)
-    await user.click(screen.getByRole('option', { name: 'Unknown' }))
-    await user.click(screen.getByRole('button', { name: 'Save channel' }))
-    await waitFor(() =>
-      expect(save).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          is_online: null,
-          is_degraded: false,
-          ttft_ms: null,
-          last_checked_at: null,
-        }),
-        expect.anything()
-      )
-    )
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Public ratio' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'Callable (online)' })
+    ).not.toBeInTheDocument()
   })
 
   it.each([
@@ -177,14 +131,14 @@ describe('channel provider configuration', () => {
           name: 'channel',
           models: 'model-a',
           key: 'key',
-          ...invalid,
+          model_configs: { 'model-a': invalid },
         }).success
       ).toBe(false)
     }
   )
 
   it.each([false, true])(
-    'displays observation fields and retains provider filtering in mobile=%s',
+    'keeps model observations out of channel rows and retains provider filtering in mobile=%s',
     async (mobile) => {
       const matchMedia = window.matchMedia.bind(window)
       vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
@@ -274,15 +228,11 @@ describe('channel provider configuration', () => {
         )
       )
       const user = userEvent.setup()
-      expect(await screen.findByText('Offline')).toBeVisible()
-      expect(screen.getByText('0.0125')).toBeVisible()
-      expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0)
-      expect(screen.getByText('Time to first token (ms)')).toBeVisible()
-      if (mobile) {
-        expect(
-          screen.getByText('Time to first token (ms)').nextElementSibling
-        ).toHaveTextContent('0')
-      }
+      expect(await screen.findByText('Observed channel')).toBeVisible()
+      expect(screen.queryByText('Public ratio')).not.toBeInTheDocument()
+      expect(
+        screen.queryByText('Time to first token (ms)')
+      ).not.toBeInTheDocument()
       await user.type(
         screen.getByPlaceholderText('Filter by name, ID, or key...'),
         'test'
@@ -335,23 +285,14 @@ describe('channel provider configuration', () => {
     await user.type(input, 'Upstream B')
     await user.keyboard('{ArrowDown}{Enter}')
     await waitFor(() => expect(input).toHaveValue('Upstream B (#3)'))
-    const ratio = screen.getByRole('spinbutton', { name: 'Upstream ratio' })
-    await user.clear(ratio)
-    await user.type(ratio, '0')
-    await user.click(screen.getByRole('button', { name: 'Save channel' }))
     expect(
-      await screen.findByText('Upstream ratio must be greater than zero')
-    ).toBeVisible()
-    expect(ratio).toHaveAttribute('aria-invalid', 'true')
-    expect(save).not.toHaveBeenCalled()
-    await user.clear(ratio)
-    await user.type(ratio, '0.0125')
+      screen.queryByRole('spinbutton', { name: 'Upstream ratio' })
+    ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Save channel' }))
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith(
         expect.objectContaining({
           provider_id: 3,
-          upstream_ratio: 0.0125,
           key: 'key-one\nkey-two',
         }),
         expect.anything()
@@ -379,7 +320,7 @@ describe('channel provider configuration', () => {
     expect(input).toBeEnabled()
   })
 
-  it('retains provider and precise upstream ratio through channel edit and create payloads', () => {
+  it('ignores retired channel-level metadata while retaining provider and multi-key payloads', () => {
     const channel = channelSchema.parse({
       id: 5,
       name: 'multi-key channel',
@@ -405,25 +346,18 @@ describe('channel provider configuration', () => {
       },
     })
     const defaults = transformChannelToFormDefaults(channel)
-    const observations = {
-      public_ratio: 0.125,
-      is_degraded: false,
-      is_online: null,
-      ttft_ms: 0,
-      last_checked_at: 1700000123,
-    }
-    expect(defaults).toMatchObject(observations)
-    expect(transformFormDataToUpdatePayload(defaults, 5)).toMatchObject(
-      observations
+    expect(defaults.model_configs).toEqual({})
+    expect(transformFormDataToUpdatePayload(defaults, 5).model_configs).toEqual(
+      {}
     )
     expect(
       transformFormDataToCreatePayload({ ...defaults, key: 'key-a' }).channel
-    ).toMatchObject(observations)
-    expect(defaults).toMatchObject({ provider_id: 7, upstream_ratio: 0.0125 })
+        .model_configs
+    ).toEqual({})
+    expect(defaults).toMatchObject({ provider_id: 7 })
     expect(transformFormDataToUpdatePayload(defaults, 5)).toMatchObject({
       id: 5,
       provider_id: 7,
-      upstream_ratio: 0.0125,
     })
     expect(transformFormDataToUpdatePayload(defaults, 5)).not.toHaveProperty(
       'key'
@@ -439,7 +373,6 @@ describe('channel provider configuration', () => {
       multi_key_mode: 'polling',
       channel: {
         provider_id: 7,
-        upstream_ratio: 0.0125,
         key: 'key-one\nkey-two',
       },
     })

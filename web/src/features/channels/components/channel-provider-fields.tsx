@@ -31,7 +31,6 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { providerOptionsQuery } from '@/features/providers/api'
 import { getServerErrorMessage } from '@/lib/server-error-message'
 
@@ -99,37 +98,6 @@ export function ChannelProviderFields(props: {
                 </Button>
               </div>
             )}
-          </FormItem>
-        )}
-      />
-      <FormField
-        control={props.control}
-        name='upstream_ratio'
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>{t('Upstream ratio')}</FormLabel>
-            <FormControl>
-              <Input
-                {...field}
-                type='number'
-                min='0'
-                step='any'
-                value={Number.isFinite(field.value) ? field.value : ''}
-                onChange={(event) =>
-                  field.onChange(
-                    event.target.value === ''
-                      ? Number.NaN
-                      : Number(event.target.value)
-                  )
-                }
-              />
-            </FormControl>
-            <FormDescription>
-              {t(
-                'Private upstream multiplier used for floor routing and multiplier filters, not customer billing.'
-              )}
-            </FormDescription>
-            <FormMessage />
           </FormItem>
         )}
       />

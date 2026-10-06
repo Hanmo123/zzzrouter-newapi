@@ -58,17 +58,17 @@ type Channel struct {
 	ProviderID int `json:"provider_id" gorm:"not null;default:0;index"`
 	// Channel-level opt-out; false/NULL remain eligible when the model is enabled.
 	SkipDegradationCheck bool `json:"-"`
-	// UpstreamRatio records the channel's upstream commercial multiplier (1 = base price).
-	// It is metadata only: it must not implicitly change customer billing or routing.
-	UpstreamRatio *float64 `json:"upstream_ratio" gorm:"not null;default:1"`
-	// PublicRatio is display-only and independent of upstream/customer billing.
-	PublicRatio *float64 `json:"public_ratio" gorm:"not null;default:1"`
-	// Nullable observations distinguish unknown from false/zero. These do not
-	// change Status, routing, or the legacy test_time/response_time fields.
-	IsDegraded    *bool  `json:"is_degraded"`
-	IsOnline      *bool  `json:"is_online"`
-	TTFTMs        *int64 `json:"ttft_ms" gorm:"type:bigint"`
-	LastCheckedAt *int64 `json:"last_checked_at" gorm:"type:bigint"` // Unix seconds
+	// Retired columns are retained only for database readability; management APIs,
+	// dispatch, billing and observations use ModelConfigs exclusively.
+	UpstreamRatio        *float64                    `json:"-" gorm:"not null;default:1"`
+	PublicRatio          *float64                    `json:"-" gorm:"not null;default:1"`
+	IsDegraded           *bool                       `json:"-"`
+	IsOnline             *bool                       `json:"-"`
+	TTFTMs               *int64                      `json:"-" gorm:"type:bigint"`
+	LastCheckedAt        *int64                      `json:"-" gorm:"type:bigint"`
+	ModelConfigs         ChannelModelConfigs         `json:"model_configs" gorm:"type:text"`
+	ModelConfigsRevision *string                     `json:"model_configs_revision,omitempty" gorm:"-"`
+	ModelRatios          map[string]*ModelRatioRange `json:"model_ratios,omitempty" gorm:"-"`
 
 	// Internal identity for immutable observations; never accepted from API JSON.
 	InstanceID *string `json:"-" gorm:"size:36;uniqueIndex"`
@@ -619,19 +619,8 @@ func (channel *Channel) Update(observationFields ...string) error {
 	if err := channel.validateMetadata(false); err != nil {
 		return err
 	}
-	observations := map[string]any{
-		"is_degraded":     channel.IsDegraded,
-		"is_online":       channel.IsOnline,
-		"ttft_ms":         channel.TTFTMs,
-		"last_checked_at": channel.LastCheckedAt,
-	}
-	updates := make(map[string]any, len(observationFields))
-	for _, field := range observationFields {
-		value, ok := observations[field]
-		if !ok {
-			return fmt.Errorf("invalid observation field: %s", field)
-		}
-		updates[field] = value
+	if len(observationFields) != 0 {
+		return errors.New("channel-wide observations are no longer supported; use model_configs")
 	}
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
@@ -675,14 +664,19 @@ func (channel *Channel) Update(observationFields ...string) error {
 		if err := validateChannelProvider(tx, channel, false); err != nil {
 			return err
 		}
+		if channel.ModelConfigs != nil && channel.ModelConfigsRevision != nil {
+			var stored Channel
+			if err := lockForUpdate(tx).First(&stored, channel.Id).Error; err != nil {
+				return err
+			}
+			if *channel.ModelConfigsRevision != stored.ModelConfigs.Revision() {
+				return errors.New("model configuration changed; reload before saving")
+			}
+		}
 		if err := tx.Model(channel).Omit("InstanceID", "SkipDegradationCheck").Updates(channel).Error; err != nil {
 			return err
 		}
-		if len(updates) > 0 {
-			if err := tx.Model(channel).Updates(updates).Error; err != nil {
-				return err
-			}
-		}
+
 		// Reset pointer fields before reloading: scanning SQL NULL into an
 		// already populated struct must not retain its previous observation.
 		channel.IsDegraded, channel.IsOnline, channel.TTFTMs, channel.LastCheckedAt = nil, nil, nil, nil
@@ -1078,7 +1072,7 @@ func SearchTags(keyword string, group string, model string, idSort bool) ([]*str
 }
 
 func (channel *Channel) ValidateSettings() error {
-	if err := channel.ValidateModelTokenPrices(); err != nil {
+	if err := channel.ValidateModelConfigs(); err != nil {
 		return err
 	}
 	channelParams := &dto.ChannelSettings{}
@@ -1164,17 +1158,8 @@ func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {
 }
 
 func (channel *Channel) SetOtherSettings(setting dto.ChannelOtherSettings) {
-	// Host billing configuration is not part of relaykit's protocol settings.
-	// Preserve it when operational endpoints update discovery/adapter settings.
-	prices, err := channel.GetModelTokenPrices()
-	if err != nil {
-		common.SysError(fmt.Sprintf("failed to preserve channel token prices: channel_id=%d, error=%v", channel.Id, err))
-		return
-	}
-	settingBytes, err := common.Marshal(struct {
-		dto.ChannelOtherSettings
-		Prices ChannelTokenPrices `json:"model_token_prices,omitempty"`
-	}{setting, prices})
+	// Per-model pricing is stored independently in ModelConfigs.
+	settingBytes, err := common.Marshal(setting)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to marshal setting: channel_id=%d, error=%v", channel.Id, err))
 		return

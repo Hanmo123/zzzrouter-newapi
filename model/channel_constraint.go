@@ -19,8 +19,8 @@ var filterEvalOrder = []dto.ChannelFilterKind{
 // On false, it returns the kind of the first violated filter (request_path
 // then task_plugin_identity) for error attribution.
 func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.ChannelFilter) (bool, dto.ChannelFilterKind) {
-	if ch == nil {
-		return false, ""
+	if ch == nil || ch.ModelConfig(modelName).ModelPublicRatio(modelName) == nil {
+		return false, dto.FilterMultiplier
 	}
 	for _, kind := range filterEvalOrder {
 		for _, filter := range filters {
@@ -43,7 +43,16 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 	if len(ids) == 0 {
 		return ids, ""
 	}
-	kept = ids
+	kept = make([]int, 0, len(ids))
+	for _, id := range ids {
+		ch := channelsIDM[id]
+		if ch == nil || ch.ModelConfig(modelName).ModelPublicRatio(modelName) != nil {
+			kept = append(kept, id)
+		}
+	}
+	if len(kept) == 0 {
+		return kept, dto.FilterMultiplier
+	}
 	for _, kind := range filterEvalOrder {
 		kindFilters := filtersByKind(filters, kind)
 		if len(kindFilters) == 0 {
@@ -92,7 +101,8 @@ func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind
 func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
 	switch filter.Kind {
 	case dto.FilterMultiplier:
-		return ch.UpstreamRatio != nil && filter.Multiplier.Matches(*ch.UpstreamRatio)
+		quoted := ch.ModelConfig(modelName).ModelPublicRatio(modelName)
+		return quoted != nil && filter.Multiplier.Matches(quoted.Min) && filter.Multiplier.Matches(quoted.Max)
 	case dto.FilterAttemptedChannels:
 		return !slices.Contains(filter.ExcludedChannelIDs, ch.Id)
 	case dto.FilterRequestPath:

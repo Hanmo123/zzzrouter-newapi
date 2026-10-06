@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"errors"
 	"slices"
 	"strings"
@@ -8,7 +9,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // PublicProvider and PublicChannel are explicit public projections. Never embed
@@ -21,17 +21,17 @@ type PublicProvider struct {
 }
 
 type PublicChannel struct {
-	ID            int     `json:"id"`
-	ProviderID    int     `json:"provider_id"`
-	ProviderName  string  `json:"provider_name"`
-	Name          string  `json:"name"`
-	Type          int     `json:"type"`
-	Models        string  `json:"models"`
-	PublicRatio   float64 `json:"public_ratio"`
-	IsDegraded    *bool   `json:"is_degraded"`
-	IsOnline      *bool   `json:"is_online"`
-	TTFTMs        *int64  `json:"ttft_ms"`
-	LastCheckedAt *int64  `json:"last_checked_at"`
+	ID            int              `json:"id"`
+	ProviderID    int              `json:"provider_id"`
+	ProviderName  string           `json:"provider_name"`
+	Name          string           `json:"name"`
+	Type          int              `json:"type"`
+	Model         string           `json:"model"`
+	PublicRatio   *ModelRatioRange `json:"public_ratio"`
+	IsDegraded    *bool            `json:"is_degraded"`
+	IsOnline      *bool            `json:"is_online"`
+	TTFTMs        *int64           `json:"ttft_ms"`
+	LastCheckedAt *int64           `json:"last_checked_at"`
 }
 
 // Catalog filters are intentionally independent from administrative queries.
@@ -133,17 +133,6 @@ func publicCatalogChannels(query PublicCatalogQuery) *gorm.DB {
 			channels = channels.Where("INSTR(',' || "+models+" || ',', ?) > 0", name)
 		}
 	}
-	for _, filter := range []struct{ column, value string }{
-		{"c.is_online", query.IsOnline},
-		{"c.is_degraded", query.IsDegraded},
-	} {
-		switch filter.value {
-		case "true", "false":
-			channels = channels.Where(filter.column+" = ?", filter.value == "true")
-		case "unknown":
-			channels = channels.Where(filter.column + " IS NULL")
-		}
-	}
 	return channels
 }
 
@@ -154,23 +143,16 @@ func ListPublicModels(query PublicCatalogQuery) ([]string, int64, error) {
 	if err := query.Normalize(); err != nil {
 		return nil, 0, err
 	}
-	var texts []string
-	if err := publicCatalogChannels(query).Pluck("c.models", &texts).Error; err != nil {
+	rows, err := publicModelRows(query)
+	if err != nil {
 		return nil, 0, err
 	}
 	seen := make(map[string]struct{})
 	search := strings.ToLower(query.Search)
-	for _, text := range texts {
-		for item := range strings.SplitSeq(text, ",") {
-			name := strings.TrimSpace(item)
-			if name == "" || len(name) > 255 || strings.ContainsFunc(name, unicode.IsControl) ||
-				(search != "" && !strings.Contains(strings.ToLower(name), search)) {
-				continue
-			}
+	for _, row := range rows {
+		name := row.Model
+		if search == "" || strings.Contains(strings.ToLower(name), search) {
 			seen[name] = struct{}{}
-			if len(seen) > 10000 {
-				return nil, 0, errors.New("public model directory is too large")
-			}
 		}
 	}
 	models := make([]string, 0, len(seen))
@@ -183,44 +165,128 @@ func ListPublicModels(query PublicCatalogQuery) ([]string, int64, error) {
 	return models[start:min(start+query.PageSize, len(models))], total, nil
 }
 
+// publicModelRows projects channel-model records before filtering, sorting and
+// pagination. It never serializes the config map (which includes private cost).
+func publicModelRows(query PublicCatalogQuery) ([]PublicChannel, error) {
+	var channels []struct {
+		ID           int
+		ProviderID   int
+		ProviderName string
+		Name         string
+		Type         int
+		Models       string
+		ModelConfigs ChannelModelConfigs `gorm:"type:text"`
+	}
+	err := publicCatalogChannels(query).Select("c.id, c.provider_id, provider.name AS provider_name, c.name, c.type, c.models, c.model_configs").Scan(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+	items := make([]PublicChannel, 0)
+	for _, channel := range channels {
+		seen := make(map[string]bool)
+		for raw := range strings.SplitSeq(channel.Models, ",") {
+			name := strings.TrimSpace(raw)
+			if name == "" || seen[name] || (query.Model != "" && name != query.Model) {
+				continue
+			}
+			seen[name] = true
+			config := channel.ModelConfigs[name]
+			if !matchesPublicObservation(config.IsOnline, query.IsOnline) || !matchesPublicObservation(config.IsDegraded, query.IsDegraded) {
+				continue
+			}
+			items = append(items, PublicChannel{ID: channel.ID, ProviderID: channel.ProviderID, ProviderName: channel.ProviderName, Name: channel.Name, Type: channel.Type, Model: name, PublicRatio: config.ModelPublicRatio(name), IsOnline: config.IsOnline, IsDegraded: config.IsDegraded, TTFTMs: config.TTFTMs, LastCheckedAt: config.LastCheckedAt})
+		}
+	}
+	return items, nil
+}
+
+func matchesPublicObservation(value *bool, filter string) bool {
+	switch filter {
+	case "true":
+		return value != nil && *value
+	case "false":
+		return value != nil && !*value
+	case "unknown":
+		return value == nil
+	default:
+		return true
+	}
+}
+
 func ListPublicProviders(query PublicCatalogQuery) ([]PublicProvider, int64, error) {
 	if err := query.Normalize(); err != nil {
 		return nil, 0, err
 	}
-	channels := publicCatalogChannels(query)
-	visibleIDs := channels.Session(&gorm.Session{}).Select("provider.id").Group("provider.id")
-	var total int64
-	if err := DB.Table("(?) AS visible_providers", visibleIDs).Count(&total).Error; err != nil {
+	rows, err := publicModelRows(query)
+	if err != nil {
 		return nil, 0, err
 	}
-	providers := make([]PublicProvider, 0)
-	err := channels.Select("provider.id, provider.name, COUNT(c.id) AS channel_count").
-		Group("provider.id, provider.name").Order("provider.id ASC").
-		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&providers).Error
-	return providers, total, err
+	byProvider := make(map[int]*PublicProvider)
+	seen := make(map[int]bool)
+	for _, row := range rows {
+		if seen[row.ID] {
+			continue
+		}
+		seen[row.ID] = true
+		if byProvider[row.ProviderID] == nil {
+			byProvider[row.ProviderID] = &PublicProvider{ID: row.ProviderID, Name: row.ProviderName}
+		}
+		byProvider[row.ProviderID].ChannelCount++
+	}
+	items := make([]PublicProvider, 0, len(byProvider))
+	for _, item := range byProvider {
+		items = append(items, *item)
+	}
+	slices.SortFunc(items, func(a, b PublicProvider) int { return cmp.Compare(a.ID, b.ID) })
+	start := min((query.Page-1)*query.PageSize, len(items))
+	return items[start:min(start+query.PageSize, len(items))], int64(len(items)), nil
 }
 
 func ListPublicChannels(query PublicCatalogQuery) ([]PublicChannel, int64, error) {
 	if err := query.Normalize(); err != nil {
 		return nil, 0, err
 	}
-	channels := publicCatalogChannels(query)
-	var total int64
-	if err := channels.Count(&total).Error; err != nil {
+	items, err := publicModelRows(query)
+	if err != nil {
 		return nil, 0, err
 	}
-	// This SELECT allowlist is a second boundary in addition to the response DTO:
-	// no upstream_ratio, keys, URLs, mappings, settings or other private metadata
-	// are even loaded. Do not use Select("*") or a Channel destination here.
-	channels = channels.Select("c.id, c.provider_id, provider.name AS provider_name, c.name, c.type, c.models, c.public_ratio, c.is_degraded, c.is_online, c.ttft_ms, c.last_checked_at")
-	if query.SortBy == "ttft_ms" {
-		// SQL NULL ordering differs by dialect; unknown TTFT is always last.
-		channels = channels.Order("CASE WHEN c.ttft_ms IS NULL THEN 1 ELSE 0 END ASC")
-	}
-	channels = channels.Order(clause.OrderByColumn{
-		Column: clause.Column{Table: "c", Name: query.SortBy}, Desc: query.SortOrder == "desc",
-	}).Order(clause.OrderByColumn{Column: clause.Column{Table: "c", Name: "id"}})
-	items := make([]PublicChannel, 0)
-	err := channels.Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&items).Error
-	return items, total, err
+	slices.SortFunc(items, func(a, b PublicChannel) int {
+		result := 0
+		if query.SortBy == "ttft_ms" {
+			if a.TTFTMs == nil && b.TTFTMs != nil {
+				return 1
+			}
+			if a.TTFTMs != nil && b.TTFTMs == nil {
+				return -1
+			}
+			if a.TTFTMs != nil && b.TTFTMs != nil {
+				result = cmp.Compare(*a.TTFTMs, *b.TTFTMs)
+			}
+		} else {
+			if a.PublicRatio == nil && b.PublicRatio != nil {
+				return 1
+			}
+			if a.PublicRatio != nil && b.PublicRatio == nil {
+				return -1
+			}
+			if a.PublicRatio != nil && b.PublicRatio != nil {
+				result = cmp.Compare(a.PublicRatio.Max, b.PublicRatio.Max)
+				if result == 0 {
+					result = cmp.Compare(a.PublicRatio.Min, b.PublicRatio.Min)
+				}
+			}
+		}
+		if query.SortOrder == "desc" {
+			result = -result
+		}
+		if result == 0 {
+			result = cmp.Compare(a.ID, b.ID)
+		}
+		if result == 0 {
+			result = strings.Compare(a.Model, b.Model)
+		}
+		return result
+	})
+	start := min((query.Page-1)*query.PageSize, len(items))
+	return items[start:min(start+query.PageSize, len(items))], int64(len(items)), nil
 }

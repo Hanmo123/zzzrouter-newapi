@@ -192,7 +192,7 @@ func TestChannelSatisfiesFilters(t *testing.T) {
 
 	ok, kind := ChannelSatisfiesFilters(nil, "gpt-4", nil)
 	assert.False(t, ok)
-	assert.Equal(t, dto.ChannelFilterKind(""), kind)
+	assert.Equal(t, dto.FilterMultiplier, kind)
 
 	ok, kind = ChannelSatisfiesFilters(alpha, "shared", identityFilters("alpha", nil))
 	require.True(t, ok)

@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "Модели и тарификация канала",
+    "Configure model: {{model}}": "Настроить модель: {{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "Настройте цены и наблюдения для каждой публичной модели. Коэффициент группы применяется к оплате пользователя последним; закупочная стоимость не включает комиссию и коэффициент группы.",
+    "Upstream discount": "Закупочный коэффициент",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Закупочная стоимость = базовая сумма × закупочный коэффициент. 0,8 означает оплату 80%.",
+    "Use model billing expression": "Использовать выражение тарификации модели",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Публичный коэффициент рассчитывается по ценам токенов базового уровня и не применяется повторно к сумме выражения.",
+    "No comparable system token prices. This model is excluded from dispatch.": "Невозможно сравнить с системными ценами токенов. Модель исключена из маршрутизации.",
+    "Public ratio is automatic with an expression.": "При использовании выражения публичный коэффициент рассчитывается автоматически.",
+    "Invalid billing expression": "Недопустимое выражение тарификации",
+    "Model charge multiplier": "Коэффициент оплаты модели",
+    "Procurement cost": "Закупочная стоимость",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "Итоговая оплата = базовая сумма модели × (1 + ставка комиссии) × коэффициент группы. Закупочная стоимость = базовая сумма модели × закупочный коэффициент.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

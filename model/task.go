@@ -543,6 +543,10 @@ func (Task *Task) Update() error {
 	return err
 }
 
+func (t *Task) UpdateBillingQuota() error {
+	return DB.Model(t).Updates(map[string]any{"quota": t.Quota, "private_data": t.PrivateData}).Error
+}
+
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
 }

@@ -95,7 +95,7 @@ export function ServiceFeeSection(props: { value: string }) {
                   <FormLabel>{t('Charge relay service fee')}</FormLabel>
                   <FormDescription>
                     {t(
-                      'Final charge = model cost × group ratio × selected channel public ratio × (1 + service fee rate).'
+                      'Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

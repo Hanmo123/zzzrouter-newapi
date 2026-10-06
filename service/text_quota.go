@@ -64,6 +64,7 @@ type textQuotaSummary struct {
 	AudioInputPrice        float64
 	ToolSurchargeItems     []ToolSurchargeItem
 	ToolCallSurchargeQuota decimal.Decimal
+	ToolBaseQuota          decimal.Decimal
 	FixedPriceBilling      bool
 }
 
@@ -205,6 +206,7 @@ func composeTieredTextQuota(relayInfo *relaycommon.RelayInfo, summary textQuotaS
 	}
 
 	if tieredResult != nil {
+		relayInfo.RelayCharge.CaptureBaseQuota(tieredResult.ActualQuotaBeforeGroup + summary.ToolBaseQuota.InexactFloat64())
 		if snap := relayInfo.TieredBillingSnapshot; snap != nil {
 			quota, clamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(tieredResult.ActualQuotaBeforeGroup).
 				Mul(decimal.NewFromFloat(snap.GroupRatio)).
@@ -289,7 +291,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dCacheRatio := decimal.NewFromFloat(summary.CacheRatio)
 	dImageRatio := decimal.NewFromFloat(summary.ImageRatio)
 	dModelRatio := decimal.NewFromFloat(summary.ModelRatio)
-	dGroupRatio := decimal.NewFromFloat(summary.GroupRatio)
+	dGroupRatio := decimal.NewFromInt(1)
 	dModelPrice := decimal.NewFromFloat(summary.ModelPrice)
 	dCacheCreationRatio := decimal.NewFromFloat(summary.CacheCreationRatio)
 	dCacheCreationRatio5m := decimal.NewFromFloat(summary.CacheCreationRatio5m)
@@ -297,7 +299,12 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 
 	ratio := dModelRatio.Mul(dGroupRatio)
-	summary.ToolCallSurchargeQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &summary)
+	toolSummary := summary
+	toolSummary.GroupRatio = 1
+	summary.ToolBaseQuota = calculateTextToolCallSurcharge(ctx, relayInfo, &toolSummary)
+	summary.ToolSurchargeItems = toolSummary.ToolSurchargeItems
+	summary.ToolCallSurchargeQuota = summary.ToolBaseQuota
+	var baseQuota decimal.Decimal
 
 	var audioInputQuota decimal.Decimal
 	if !relayInfo.PriceData.UsePrice {
@@ -358,22 +365,26 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		if !ratio.IsZero() && quotaCalculateDecimal.LessThanOrEqual(decimal.Zero) {
 			quotaCalculateDecimal = decimal.NewFromInt(1)
 		}
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		baseQuota = quotaCalculateDecimal
 	} else {
 		quotaCalculateDecimal := dModelPrice.Mul(dQuotaPerUnit).Mul(dGroupRatio)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(audioInputQuota)
 		quotaCalculateDecimal = relayInfo.PriceData.ApplyOtherRatiosToDecimal(quotaCalculateDecimal)
 		quotaCalculateDecimal = quotaCalculateDecimal.Add(summary.ToolCallSurchargeQuota)
-		quota, clamp := common.QuotaFromDecimalChecked(quotaCalculateDecimal)
-		summary.Quota = quota
-		noteQuotaClamp(relayInfo, clamp)
+		baseQuota = quotaCalculateDecimal
 	}
+	if !summary.hasBillableUsage() {
+		baseQuota = decimal.Zero
+	}
+	relayInfo.RelayCharge.CaptureBaseQuota(baseQuota.InexactFloat64())
+	quota, clamp := common.QuotaFromDecimalChecked(baseQuota.Mul(decimal.NewFromFloat(summary.GroupRatio)))
+	summary.Quota = quota
+	noteQuotaClamp(relayInfo, clamp)
+	summary.ToolCallSurchargeQuota = summary.ToolBaseQuota.Mul(decimal.NewFromFloat(summary.GroupRatio))
 
 	if !summary.hasBillableUsage() {
 		summary.Quota = 0
-	} else if !ratio.IsZero() && summary.Quota == 0 {
+	} else if summary.GroupRatio != 0 && !ratio.IsZero() && summary.Quota == 0 {
 		summary.Quota = 1
 	}
 

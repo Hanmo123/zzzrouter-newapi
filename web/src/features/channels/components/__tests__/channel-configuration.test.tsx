@@ -325,7 +325,7 @@ test('the visible Copy button is disabled when the user cannot create channels',
 test('copying a channel prefills an editable create draft but waits for explicit submission and a new key', async () => {
   editingChannel.name = 'Source channel'
   editingChannel.models = 'model-one,model-two'
-  editingChannel.public_ratio = 0.7
+  editingChannel.model_configs = { 'model-one': { public_ratio: 0.7 } }
   editingChannel.model_mapping = '{"model-one":"upstream-one"}'
   editingChannel.key = ''
   const post = vi
@@ -344,8 +344,8 @@ test('copying a channel prefills an editable create draft but waits for explicit
   expect(screen.getByLabelText('Name *')).toHaveValue('Source channel_copy')
   expect(screen.getByLabelText(/Base URL/)).toHaveValue('https://saved.example')
   expect(screen.getByLabelText('API Key *')).toHaveValue('')
-  expect(screen.getByText('model-one')).toBeVisible()
-  expect(screen.getByText('model-two')).toBeVisible()
+  expect(screen.getAllByText('model-one').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('model-two').length).toBeGreaterThan(0)
   expect(
     screen.getByText(
       'Enter a new API key to create the copy. The source key is not available in this form.'
@@ -377,7 +377,9 @@ test('copying a channel prefills an editable create draft but waits for explicit
           key: 'new-secret',
           models: 'model-one,model-two',
           model_mapping: '{"model-one":"upstream-one"}',
-          public_ratio: 0.7,
+          model_configs: expect.objectContaining({
+            'model-one': expect.objectContaining({ public_ratio: 0.7 }),
+          }),
         }),
       }),
       expect.anything()
@@ -1317,7 +1319,7 @@ test('model discovery discards a response for old credentials and retains manual
   expect(
     screen.getByRole('button', { name: 'current-upstream-model' })
   ).toBeVisible()
-  expect(screen.getByText('custom-model')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
 })
 
 test('model discovery reports failures inline and allows an empty result to fall back to manual models', async () => {
@@ -1550,7 +1552,7 @@ test('editing legacy channels retains the full provider list and saves the origi
   const legacy = screen.getByRole('option', { name: 'Sora Built-in #55' })
   expect(legacy).toHaveAttribute('aria-current', 'true')
   await user.click(legacy)
-  expect(screen.getByText('custom-model')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
   expect(screen.getByDisplayValue('https://saved.example')).toBeVisible()
   fireEvent.change(screen.getByLabelText('Name *'), {
     target: { value: 'Renamed legacy channel' },
@@ -1582,25 +1584,25 @@ test('opening and reselecting an existing plugin preserves its saved configurati
   render(<ConfigurationHarness currentRow={editingChannel} />)
   expect(await screen.findByDisplayValue('Existing channel')).toBeVisible()
   expect(screen.getByDisplayValue('https://saved.example')).toBeVisible()
-  expect(screen.getByText('custom-model')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
   expect(screen.queryByLabelText('Task plugin *')).not.toBeInTheDocument()
   const providerControl = screen.getByRole('button', {
     name: 'Change provider',
   })
   await user.click(await within(providerControl).findByText('Video A'))
   await user.click(await screen.findByRole('option', { name: /Video A/ }))
-  expect(screen.getByText('custom-model')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
   expect(screen.getByDisplayValue('https://saved.example')).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(
     screen.getByRole('button', { name: 'Back to configuration' })
   )
-  expect(screen.getByText('custom-model')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /^Video B Plugin/ }))
   expect(screen.getByDisplayValue('Existing channel')).toBeVisible()
   expect(screen.getByDisplayValue('https://saved.example')).toBeVisible()
-  expect(screen.getByText('video-b-1')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'video-b-1' })).toBeVisible()
   await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
   expect(screen.getByLabelText('Priority')).toHaveValue(7)
 })

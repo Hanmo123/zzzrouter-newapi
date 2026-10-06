@@ -642,12 +642,12 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		}
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	publicRatio := 1.0
-	if channel.PublicRatio != nil {
-		publicRatio = *channel.PublicRatio
+	modelConfig := channel.ModelConfig(modelName)
+	if modelConfig.ModelPublicRatio(modelName) == nil {
+		return types.NewErrorWithStatusCode(errors.New("model pricing cannot be compared; channel model is excluded from dispatch"), types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	c.Set("channel_public_ratio", publicRatio)
-	c.Set(model.ChannelPricingSettingsContextKey, channel.OtherSettings)
+	c.Set("channel_model_config", modelConfig)
+	c.Set("channel_public_ratio", modelConfig.ChargeRatio())
 	common.SetContextKey(c, constant.ContextKeyChannelName, channel.Name)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelCreateTime, channel.CreatedTime)

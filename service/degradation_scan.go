@@ -219,7 +219,6 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 		if len(channels) == 0 {
 			return summary, nil
 		}
-		pageStartedAt := time.Now().UnixMilli()
 		indices := make(map[int]map[string]int)
 		var targets []DegradationTarget
 		if !options.DryRun {
@@ -261,9 +260,6 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 			if len(names) == 0 {
 				names = append(names, "")
 			}
-			normal, abnormal, failed, skipped := 0, 0, 0, 0
-			startedAt, completedAt := pageStartedAt, int64(0)
-			var ttft *int64
 			for _, name := range names {
 				summary.Targets++
 				event := degradationScanEvent{Kind: "result", TaskID: taskID, ProviderID: channel.ProviderID, ChannelID: channel.Id, Model: name}
@@ -275,9 +271,7 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 				case skip != "":
 					event.State, event.Reason = "skipped", skip
 					summary.Skipped++
-					if skip != "model_check_disabled" {
-						skipped++
-					}
+
 				case options.DryRun:
 					event.State = "selected"
 				default:
@@ -286,24 +280,19 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 						summary.Targets--
 						continue // Not dispatched; retain gaps rather than inventing results.
 					}
-					if observation.State != "error" && observation.TTFTMs != nil && (ttft == nil || *observation.TTFTMs > *ttft) {
-						value := *observation.TTFTMs
-						ttft = &value
-					}
+
 					event.State, event.Observation = observation.State, &observation
-					if _, writeErr := recordDegradationObservation(ctx, &channel, name, target, observation, taskID, runnerID, true); writeErr != nil {
+					if sample, writeErr := recordDegradationObservation(ctx, &channel, name, target, observation, taskID, runnerID, false); writeErr != nil {
 						probeErr = errors.Join(probeErr, writeErr)
+					} else if sample.SnapshotApplied {
+						summary.SnapshotApplied++
 					}
-					completedAt = max(completedAt, observation.CompletedAt)
 					switch observation.State {
 					case "normal":
-						normal++
 						summary.Normal++
 					case "abnormal":
-						abnormal++
 						summary.Abnormal++
 					default:
-						failed++
 						summary.Errors++
 					}
 				}
@@ -316,23 +305,7 @@ func RunDegradationScan(ctx context.Context, options DegradationScanOptions, tas
 					probeErr = errors.Join(probeErr, err)
 				}
 			}
-			// No last-model-wins: only a complete, unfiltered channel evaluation may
-			// publish an aggregate. Any abnormal model wins over normal models; errors
-			// without an abnormal verdict remain unknown. Skips preserve the old snapshot.
-			if probeErr == nil && ctx.Err() == nil && !options.DryRun && channel.Status == common.ChannelStatusEnabled && len(options.Models) == 0 && skipped == 0 && completedAt > 0 {
-				var degraded *bool
-				if abnormal > 0 || failed == 0 {
-					value := abnormal > 0
-					degraded = &value
-				}
-				applied, err := model.ApplyDegradationScanSummary(ctx, &channel, taskID, runnerID, startedAt, completedAt, degraded, normal+abnormal > 0, ttft)
-				if err != nil {
-					probeErr = errors.Join(probeErr, err)
-				}
-				if applied {
-					summary.SnapshotApplied++
-				}
-			}
+
 		}
 		if probeErr != nil || ctx.Err() != nil {
 			return summary, errors.Join(probeErr, ctx.Err())

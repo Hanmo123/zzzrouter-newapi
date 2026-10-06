@@ -18,25 +18,50 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-const price = z.number().min(0).max(1_000_000_000)
+import { compileBillingExpression } from '@/features/pricing/lib/billing-expression/parser'
 
-export const channelTokenPricesSchema = z.record(
+export const channelModelConfigSchema = z
+  .object({
+    upstream_discount: z.number().min(0).max(1).optional(),
+    public_ratio: z.number().nonnegative().optional(),
+    billing_expression: z.string().max(16384).optional(),
+    is_degraded: z.boolean().nullish(),
+    is_online: z.boolean().nullish(),
+    ttft_ms: z.number().int().nonnegative().nullish(),
+    last_checked_at: z.number().int().min(0).max(253402300799).nullish(),
+  })
+  .superRefine((config, ctx) => {
+    if (config.billing_expression && config.public_ratio !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Public ratio is automatic with an expression.',
+      })
+    }
+    if (config.billing_expression) {
+      if (
+        compileBillingExpression(config.billing_expression).status !== 'ready'
+      ) {
+        ctx.addIssue({ code: 'custom', message: 'Invalid billing expression' })
+      }
+    }
+  })
+export const channelModelConfigsSchema = z.record(
   z
     .string()
     .min(1)
+    .max(255)
     .refine((name) => name.trim() === name),
-  z.strictObject({
-    p: price,
-    c: price,
-    cr: price.optional(),
-    cc: price.optional(),
-    cc1h: price.optional(),
-    img: price.optional(),
-    img_cr: price.optional(),
-    img_o: price.optional(),
-    ai: price.optional(),
-    ao: price.optional(),
-  })
+  channelModelConfigSchema
 )
+export type ChannelModelConfig = z.infer<typeof channelModelConfigSchema>
+export type ChannelModelConfigs = z.infer<typeof channelModelConfigsSchema>
+export type ModelRatioRange = { min: number; max: number }
 
-export type ChannelTokenPrices = z.infer<typeof channelTokenPricesSchema>
+export function modelRatioLabel(
+  ratio: ModelRatioRange | null | undefined
+): string {
+  if (!ratio) return '—'
+  const lower = Number(ratio.min.toPrecision(8))
+  const upper = Number(ratio.max.toPrecision(8))
+  return lower === upper ? `${lower}x` : `${lower}x~${upper}x`
+}

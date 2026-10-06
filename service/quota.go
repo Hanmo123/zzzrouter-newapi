@@ -45,23 +45,32 @@ func hasCustomModelRatio(modelName string, currentRatio float64) bool {
 	return currentRatio != defaultRatio
 }
 
+func calculateRelayAudioQuota(relayInfo *relaycommon.RelayInfo, info QuotaInfo) (int, *common.QuotaClamp) {
+	base := calculateAudioBaseQuota(info)
+	if relayInfo.TieredBillingSnapshot == nil {
+		relayInfo.RelayCharge.CaptureBaseQuota(base.InexactFloat64())
+	}
+	return common.QuotaFromDecimalChecked(base.Mul(decimal.NewFromFloat(info.GroupRatio)))
+}
+
 func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
+	base := calculateAudioBaseQuota(info)
+	return common.QuotaFromDecimalChecked(base.Mul(decimal.NewFromFloat(info.GroupRatio)))
+}
+
+func calculateAudioBaseQuota(info QuotaInfo) decimal.Decimal {
 	if info.UsePrice {
 		modelPrice := decimal.NewFromFloat(info.ModelPrice)
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		groupRatio := decimal.NewFromFloat(info.GroupRatio)
-
-		quota := modelPrice.Mul(quotaPerUnit).Mul(groupRatio)
-		return common.QuotaFromDecimalChecked(quota)
+		return modelPrice.Mul(quotaPerUnit)
 	}
 
 	completionRatio := decimal.NewFromFloat(ratio_setting.GetCompletionRatio(info.ModelName))
 	audioRatio := decimal.NewFromFloat(ratio_setting.GetAudioRatio(info.ModelName))
 	audioCompletionRatio := decimal.NewFromFloat(ratio_setting.GetAudioCompletionRatio(info.ModelName))
 
-	groupRatio := decimal.NewFromFloat(info.GroupRatio)
 	modelRatio := decimal.NewFromFloat(info.ModelRatio)
-	ratio := groupRatio.Mul(modelRatio)
+	ratio := modelRatio
 
 	inputTextTokens := decimal.NewFromInt(int64(info.InputDetails.TextTokens))
 	outputTextTokens := decimal.NewFromInt(int64(info.OutputDetails.TextTokens))
@@ -81,7 +90,7 @@ func calculateAudioQuota(info QuotaInfo) (int, *common.QuotaClamp) {
 		quota = decimal.NewFromInt(1)
 	}
 
-	return common.QuotaFromDecimalChecked(quota)
+	return quota
 }
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
@@ -137,7 +146,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		GroupRatio: actualGroupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp := calculateRelayAudioQuota(relayInfo, quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 
 	if userQuota < quota {
@@ -201,7 +210,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		GroupRatio: groupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp := calculateRelayAudioQuota(relayInfo, quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 	if tieredOk {
 		quota = tieredQuota
@@ -334,7 +343,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		GroupRatio: groupRatio,
 	}
 
-	quota, clamp := calculateAudioQuota(quotaInfo)
+	quota, clamp := calculateRelayAudioQuota(relayInfo, quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
 	if tieredOk {
 		quota = tieredQuota

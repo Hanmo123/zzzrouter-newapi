@@ -16,174 +16,115 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { Control } from 'react-hook-form'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Combobox } from '@/components/ui/combobox'
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import dayjs from '@/lib/dayjs'
 
-import type { ChannelFormValues } from '../lib/channel-form'
+import type { ChannelModelConfig } from '../lib/channel-token-pricing'
 
 export function ChannelObservationFields(props: {
-  control: Control<ChannelFormValues>
+  value: ChannelModelConfig
+  onChange: (value: ChannelModelConfig) => void
+  disabled?: boolean
 }) {
   const { t } = useTranslation()
+  const id = useId()
   return (
-    <div className='grid gap-4 sm:grid-cols-2'>
-      <FormField
-        control={props.control}
-        name='public_ratio'
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>{t('Public ratio')}</FormLabel>
-            <FormControl>
-              <Input
-                {...field}
-                type='number'
-                min='0'
-                step='any'
-                value={Number.isFinite(field.value) ? field.value : ''}
-                onChange={(event) =>
-                  field.onChange(
-                    event.target.value === ''
-                      ? Number.NaN
-                      : Number(event.target.value)
-                  )
-                }
-              />
-            </FormControl>
-            <FormDescription>
-              {t(
-                'Public multiplier applied to customer billing after the group ratio and before the service fee.'
-              )}
-            </FormDescription>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
+    <FieldGroup className='grid sm:grid-cols-2'>
       {(
         [
           {
             name: 'is_degraded',
-            label: t('Is degraded'),
-            yes: t('Degraded'),
-            no: t('Not degraded'),
+            label: 'Is degraded',
+            yes: 'Degraded',
+            no: 'Not degraded',
           },
           {
             name: 'is_online',
-            label: t('Callable (online)'),
-            yes: t('Online'),
-            no: t('Offline'),
+            label: 'Callable (online)',
+            yes: 'Online',
+            no: 'Offline',
           },
         ] as const
       ).map((item) => (
-        <FormField
-          key={item.name}
-          control={props.control}
-          name={item.name}
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>{item.label}</FormLabel>
-              <FormControl>
-                <Combobox
-                  ref={field.ref}
-                  name={field.name}
-                  onBlur={field.onBlur}
-                  value={field.value == null ? 'unknown' : String(field.value)}
-                  onValueChange={(value) =>
-                    field.onChange(
-                      value === 'unknown' || value == null
-                        ? null
-                        : value === 'true'
-                    )
-                  }
-                  options={[
-                    { value: 'unknown', label: t('Unknown') },
-                    { value: 'true', label: item.yes },
-                    { value: 'false', label: item.no },
-                  ]}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        <Field key={item.name}>
+          <FieldLabel htmlFor={`${id}-${item.name}`}>
+            {t(item.label)}
+          </FieldLabel>
+          <Combobox
+            id={`${id}-${item.name}`}
+            disabled={props.disabled}
+            value={
+              props.value[item.name] == null
+                ? 'unknown'
+                : String(props.value[item.name])
+            }
+            onValueChange={(value) =>
+              props.onChange({
+                ...props.value,
+                [item.name]:
+                  value === 'unknown' || value == null
+                    ? null
+                    : value === 'true',
+              })
+            }
+            options={[
+              { value: 'unknown', label: t('Unknown') },
+              { value: 'true', label: t(item.yes) },
+              { value: 'false', label: t(item.no) },
+            ]}
+          />
+        </Field>
       ))}
-      <FormField
-        control={props.control}
-        name='ttft_ms'
-        render={({ field }) => (
-          <FormItem>
-            <FormLabel>{t('Time to first token (ms)')}</FormLabel>
-            <FormControl>
-              <Input
-                {...field}
-                type='number'
-                min='0'
-                step='1'
-                value={field.value ?? ''}
-                onChange={(event) =>
-                  field.onChange(
-                    event.target.value === ''
-                      ? null
-                      : Number(event.target.value)
-                  )
-                }
-              />
-            </FormControl>
-            <FormDescription>
-              {t('Blank means unknown; zero is a measured value.')}
-            </FormDescription>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-      <FormField
-        control={props.control}
-        name='last_checked_at'
-        render={({ field }) => (
-          <FormItem className='sm:col-span-2'>
-            <FormLabel>{t('Last checked')}</FormLabel>
-            <FormControl>
-              {/* DateTimePicker supports minutes only; this input preserves observation seconds. */}
-              <Input
-                {...field}
-                type='datetime-local'
-                step='1'
-                value={
-                  field.value == null || !Number.isFinite(field.value)
-                    ? ''
-                    : dayjs.unix(field.value).format('YYYY-MM-DDTHH:mm:ss')
-                }
-                onChange={(event) =>
-                  field.onChange(
-                    event.target.value === ''
-                      ? null
-                      : Math.floor(
-                          new Date(event.target.value).getTime() / 1000
-                        )
-                  )
-                }
-              />
-            </FormControl>
-            <FormDescription>
-              {t(
-                'Latest observation in local time. These fields do not enable or disable the channel and are not evaluation history.'
-              )}
-            </FormDescription>
-            <FormMessage />
-          </FormItem>
-        )}
-      />
-    </div>
+      <Field>
+        <FieldLabel htmlFor={`${id}-ttft`}>
+          {t('Time to first token (ms)')}
+        </FieldLabel>
+        <Input
+          id={`${id}-ttft`}
+          type='number'
+          min={0}
+          step={1}
+          disabled={props.disabled}
+          value={props.value.ttft_ms ?? ''}
+          onChange={(event) =>
+            props.onChange({
+              ...props.value,
+              ttft_ms:
+                event.target.value === '' ? null : Number(event.target.value),
+            })
+          }
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${id}-checked`}>{t('Last checked')}</FieldLabel>
+        <Input
+          id={`${id}-checked`}
+          type='datetime-local'
+          step={1}
+          disabled={props.disabled}
+          value={
+            props.value.last_checked_at == null
+              ? ''
+              : dayjs
+                  .unix(props.value.last_checked_at)
+                  .format('YYYY-MM-DDTHH:mm:ss')
+          }
+          onChange={(event) =>
+            props.onChange({
+              ...props.value,
+              last_checked_at:
+                event.target.value === ''
+                  ? null
+                  : Math.floor(new Date(event.target.value).getTime() / 1000),
+            })
+          }
+        />
+      </Field>
+    </FieldGroup>
   )
 }

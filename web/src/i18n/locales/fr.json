@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "Modèles et facturation du canal",
+    "Configure model: {{model}}": "Configurer le modèle : {{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "Configurez les prix et observations de chaque modèle public. Le coefficient de groupe est appliqué en dernier aux frais clients ; le coût d’achat exclut les frais de service et le coefficient de groupe.",
+    "Upstream discount": "Coefficient d’achat amont",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Coût d’achat = montant de base × coefficient amont. 0,8 signifie payer 80 %.",
+    "Use model billing expression": "Utiliser une expression de facturation",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Le coefficient public est calculé à partir des prix des tokens du palier de base. Il ne multiplie pas à nouveau le montant de l’expression.",
+    "No comparable system token prices. This model is excluded from dispatch.": "Comparaison impossible avec les prix système des tokens. Ce modèle est exclu du routage.",
+    "Public ratio is automatic with an expression.": "Le coefficient public est automatique avec une expression.",
+    "Invalid billing expression": "Expression de facturation invalide",
+    "Model charge multiplier": "Coefficient de facturation du modèle",
+    "Procurement cost": "Coût d’achat",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "Montant final = montant de base du modèle × (1 + taux de service) × coefficient de groupe. Coût d’achat = montant de base du modèle × coefficient amont.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

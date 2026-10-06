@@ -82,6 +82,7 @@ var channelOperationalFields = map[string]struct{}{
 // channelReadOnlyFields lists server-managed/accounting fields that the general
 // channel edit endpoint must ignore even if a client sends them.
 var channelReadOnlyFields = map[string]struct{}{
+	"model_ratios":         {},
 	"created_time":         {},
 	"test_time":            {},
 	"response_time":        {},
@@ -118,27 +119,24 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 // to the fail-closed branch and is treated as sensitive. The
 // TestChannelFieldsAreClassified guard test enforces this.
 var channelNonSensitiveFields = map[string]struct{}{
-	// Display/observation metadata does not grant access or change billing/routing.
-	"provider_id":         {},
-	"upstream_ratio":      {},
-	"public_ratio":        {},
-	"is_degraded":         {},
-	"is_online":           {},
-	"ttft_ms":             {},
-	"last_checked_at":     {},
-	"id":                  {},
-	"test_model":          {},
-	"name":                {},
-	"weight":              {},
-	"models":              {},
-	"group":               {},
-	"model_mapping":       {},
-	"status_code_mapping": {},
-	"priority":            {},
-	"auto_ban":            {},
-	"other_info":          {},
-	"tag":                 {},
-	"remark":              {},
-	"channel_info":        {},
-	"multi_key_mode":      {},
+	// Commercial/routing configuration requires channel.write, but never grants
+	// access to credentials or permission to change channel status.
+	"provider_id":            {},
+	"model_configs":          {},
+	"model_configs_revision": {},
+	"id":                     {},
+	"test_model":             {},
+	"name":                   {},
+	"weight":                 {},
+	"models":                 {},
+	"group":                  {},
+	"model_mapping":          {},
+	"status_code_mapping":    {},
+	"priority":               {},
+	"auto_ban":               {},
+	"other_info":             {},
+	"tag":                    {},
+	"remark":                 {},
+	"channel_info":           {},
+	"multi_key_mode":         {},
 }

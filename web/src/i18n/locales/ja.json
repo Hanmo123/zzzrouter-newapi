@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Channel models and billing": "チャネルのモデルと課金",
+    "Configure model: {{model}}": "モデル設定：{{model}}",
+    "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "公開モデルごとに価格と観測データを設定します。ユーザー料金には最後にグループ倍率を適用します。仕入原価にサービス料とグループ倍率は含まれません。",
+    "Upstream discount": "上流割引係数",
+    "Cost = base charge × upstream discount. 0.8 means paying 80%.": "仕入原価 = 基本料金 × 上流割引係数。0.8 は 80% の支払いを意味します。",
+    "Use model billing expression": "モデルの課金式を使用",
+    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "公開倍率は基本段階のトークン価格から算出します。課金式の料金に再適用しません。",
+    "No comparable system token prices. This model is excluded from dispatch.": "システムのトークン価格と比較できないため、このモデルはルーティング対象外です。",
+    "Public ratio is automatic with an expression.": "課金式を使用すると公開倍率は自動計算されます。",
+    "Invalid billing expression": "課金式が無効です",
+    "Model charge multiplier": "モデル課金倍率",
+    "Procurement cost": "仕入原価",
+    "Final charge = model base charge × (1 + service fee rate) × group ratio. Procurement cost = model base charge × upstream discount.": "最終料金 = モデル基本料金 × (1 + サービス料率) × グループ倍率。仕入原価 = モデル基本料金 × 上流割引係数。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
