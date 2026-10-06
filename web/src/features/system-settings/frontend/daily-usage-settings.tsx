@@ -174,7 +174,7 @@ export function DailyUsageSettings() {
           </TabsContent>
         </Tabs>
         <div className='flex flex-wrap items-center justify-between gap-3'>
-          <h3 className='font-medium'>{t('Recorded daily usage')}</h3>
+          <h3 className='font-medium'>{t('Daily token data')}</h3>
           <div className='flex items-center gap-2'>
             <Select
               value={String(days)}
@@ -206,7 +206,7 @@ export function DailyUsageSettings() {
           </div>
         </div>
         {records.length === 0 ? (
-          <EmptyState title={t('No daily records yet')} />
+          <EmptyState title={t('No token data yet')} />
         ) : (
           <ScrollArea className='h-80'>
             <Table>
@@ -265,7 +265,7 @@ export function DailyUsageSettings() {
         )}
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Only recorded dates are listed. Use the date form or CSV to add a missing day; deleting a record restores missing data, not zero.'
+            'Dates with data are listed. Use the chart, date form or CSV to update values; deleting a record restores no data, not zero.'
           )}
         </p>
       </CardContent>
@@ -276,7 +276,7 @@ export function DailyUsageSettings() {
         }}
         title={t('Delete daily usage?')}
         desc={t(
-          'Delete the record for {{date}}? This restores missing data instead of setting the count to zero.',
+          'Delete the token data for {{date}}? This restores no data instead of setting the count to zero.',
           { date: deleting }
         )}
         confirmText={t('Delete daily record')}

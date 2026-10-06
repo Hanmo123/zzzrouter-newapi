@@ -19,8 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import i18next from 'i18next'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 
+import zhTwMessages from '@/i18n/locales/zh-TW.json'
+import zhMessages from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 
 import { parseUsageCsv } from '../daily-usage-data'
@@ -117,6 +120,45 @@ it('loads the saved homepage models and submits their new order with the selecte
     })
   )
 })
+
+it.each([
+  { language: 'zh', messages: zhMessages.translation, empty: '无数据' },
+  { language: 'zh-TW', messages: zhTwMessages.translation, empty: '無數據' },
+])(
+  'daily token UI uses data wording in $language without entry-related labels',
+  async ({ language, messages, empty }) => {
+    const user = userEvent.setup()
+    i18next.addResourceBundle(language, 'translation', messages)
+    await i18next.changeLanguage(language)
+    try {
+      renderSettings()
+      await user.click(
+        await screen.findByRole('tab', {
+          name: messages['Daily usage display'],
+        })
+      )
+      await user.click(
+        await screen.findByRole('button', {
+          name: messages['Select token date {{date}}'].replace(
+            '{{date}}',
+            '2026-09-28'
+          ),
+        })
+      )
+      expect(screen.getByRole('status')).toHaveTextContent(empty)
+      expect(document.body).not.toHaveTextContent(/录入|錄入|补录|補錄/)
+      await user.click(
+        screen.getByRole('tab', { name: messages['Single date'] })
+      )
+      expect(
+        screen.getByRole('tab', { name: messages['Single date'] })
+      ).toHaveTextContent(/编辑|編輯/)
+      expect(document.body).not.toHaveTextContent(/录入|錄入|补录|補錄/)
+    } finally {
+      await i18next.changeLanguage('en')
+    }
+  }
+)
 
 it('CSV validates token integers and ended UTC dates rather than request counts', () => {
   for (const csv of [

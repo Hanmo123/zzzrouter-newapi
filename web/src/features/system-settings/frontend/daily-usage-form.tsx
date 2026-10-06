@@ -128,7 +128,7 @@ export function DailyUsageForm(props: {
         />
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Saving replaces that date only. Zero is a recorded count; missing dates remain unknown.'
+            'Saving replaces that date only. Zero is a known value; missing dates have no data.'
           )}
         </p>
         <Button type='submit' disabled={props.pending} className='self-end'>

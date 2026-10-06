@@ -225,7 +225,7 @@ export function DailyUsageBarEditor(props: {
       <p role='status' className='text-muted-foreground text-sm'>
         {t('{{count}} dates changed', { count: dirty.length })} ·{' '}
         {selectedCount === null
-          ? t('Not recorded')
+          ? t('No Data')
           : `${formatNumber(selectedCount, locale)} Tokens`}
       </p>
       <div className='flex flex-wrap justify-end gap-2'>
