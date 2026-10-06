@@ -22,6 +22,18 @@ import { compileBillingExpression } from '@/features/pricing/lib/billing-express
 
 export const channelModelConfigSchema = z
   .object({
+    pricing_source: z
+      .object({
+        provider: z.literal('newapi'),
+        base_url: z.string().max(2048),
+        group: z.string().max(128),
+        expression: z.string().max(16384),
+        source_hash: z.string(),
+        fetched_at: z.number().int().nonnegative(),
+        applied_expression: z.string().optional(),
+        applied_ratio: z.number().nonnegative().optional(),
+      })
+      .optional(),
     upstream_discount: z.number().min(0).max(1).optional(),
     public_ratio: z.number().nonnegative().optional(),
     billing_expression: z.string().max(16384).optional(),

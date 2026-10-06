@@ -206,6 +206,7 @@ export const channelFormSchema = z
   .object({
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
     provider_id: z.number().int().positive().optional(),
+    upstream_pricing_group: z.string().max(128).optional(),
     model_configs: channelModelConfigsSchema.optional(),
     model_configs_revision: z.string().optional(),
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
@@ -433,6 +434,7 @@ export type ChannelFormValues = z.infer<typeof channelFormSchema>
 export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   provider_id: undefined,
+  upstream_pricing_group: '',
   model_configs: {},
   type: 1,
   base_url: '',
@@ -558,6 +560,7 @@ export function transformChannelToFormDefaults(
   let claudeBetaQuery = false
   let ollamaOpenAIChat = false
   let disableTaskPollingSleep = false
+  let upstreamPricingGroup = ''
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -580,6 +583,7 @@ export function transformChannelToFormDefaults(
       claudeBetaQuery = parsed.claude_beta_query === true
       ollamaOpenAIChat = parsed.ollama_openai_chat === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
+      upstreamPricingGroup = parsed.upstream_pricing?.group ?? ''
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -601,6 +605,7 @@ export function transformChannelToFormDefaults(
   return {
     name: channel.name || '',
     provider_id: channel.provider_id || undefined,
+    upstream_pricing_group: upstreamPricingGroup,
     model_configs: channel.model_configs ?? {},
     model_configs_revision: channel.model_configs_revision ?? undefined,
     type: channel.type,
@@ -835,6 +840,18 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.advanced_custom
   }
 
+  if (
+    formData.type === CHANNEL_TYPE_NEW_API &&
+    formData.upstream_pricing_group?.trim()
+  ) {
+    settingsObj.upstream_pricing = {
+      provider: 'newapi',
+      group: formData.upstream_pricing_group.trim(),
+    }
+    settingsObj.upstream_model_update_auto_sync_enabled = false
+  } else {
+    delete settingsObj.upstream_pricing
+  }
   delete settingsObj.model_token_prices
   return JSON.stringify(settingsObj)
 }

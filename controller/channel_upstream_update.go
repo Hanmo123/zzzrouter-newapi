@@ -534,7 +534,7 @@ func checkAndPersistChannelUpstreamModelUpdates(
 		return false, 0, fetchErr
 	}
 
-	if allowAutoApply && settings.UpstreamModelUpdateAutoSyncEnabled && len(pendingAddModels) > 0 {
+	if allowAutoApply && settings.UpstreamPricing == nil && settings.UpstreamModelUpdateAutoSyncEnabled && len(pendingAddModels) > 0 {
 		originModels := normalizeModelNames(channel.GetModels())
 		mergedModels := mergeModelNames(originModels, pendingAddModels)
 		if len(mergedModels) > len(originModels) {

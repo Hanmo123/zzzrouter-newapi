@@ -34,17 +34,22 @@ import {
   type ChannelFormValues,
 } from '../../lib/channel-form'
 import { channelModelConfigsSchema } from '../../lib/channel-token-pricing'
+import { ChannelPricingImportFields } from '../channel-pricing-import-fields'
 import { ChannelTokenPricingFields } from '../channel-token-pricing-fields'
 
 function PricingForm(props: {
   save: (data: ChannelFormValues) => void
   empty?: boolean
   disabled?: boolean
+  importPrices?: boolean
 }) {
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
     defaultValues: {
       ...CHANNEL_FORM_DEFAULT_VALUES,
+      type: props.importPrices ? 60 : 1,
+      base_url: props.importPrices ? 'https://prices.example' : '',
+      upstream_pricing_group: props.importPrices ? 'vip' : '',
       name: 'channel',
       key: 'key',
       models: props.empty ? '' : 'public.model-a,model-b',
@@ -62,6 +67,9 @@ function PricingForm(props: {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(props.save)}>
+        {props.importPrices && (
+          <ChannelPricingImportFields disabled={props.disabled} />
+        )}
         <ChannelTokenPricingFields
           control={form.control}
           disabled={props.disabled}
@@ -73,7 +81,7 @@ function PricingForm(props: {
 }
 function renderForm(
   save = vi.fn(),
-  options: { empty?: boolean; disabled?: boolean } = {}
+  options: { empty?: boolean; disabled?: boolean; importPrices?: boolean } = {}
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -87,6 +95,160 @@ function renderForm(
 }
 
 describe('channel model configuration', () => {
+  it('imports full tiered prices into the draft and persists source metadata with the group', async () => {
+    const expression =
+      'v1:(len <= 100 ? tier("base",p*2+c*8) : tier("long",p*4+c*24)) * 0.1'
+    const source = {
+      provider: 'newapi',
+      base_url: 'https://prices.example',
+      group: 'vip',
+      expression,
+      source_hash: 'price-hash',
+      fetched_at: 100,
+      applied_expression: expression,
+    }
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          models: ['imported'],
+          model_configs: {
+            imported: {
+              billing_expression: expression,
+              pricing_source: source,
+            },
+          },
+          items: [{ model: 'imported', action: 'added', schedulable: true }],
+          removed: ['old-model'],
+        },
+      },
+    })
+    const save = renderForm(vi.fn(), { empty: true, importPrices: true })
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    )
+    expect(
+      await screen.findByRole('button', { name: 'Configure model: imported' })
+    ).toBeVisible()
+    expect(
+      screen.getByText(
+        'Models missing from the upstream catalog were preserved: old-model'
+      )
+    ).toBeVisible()
+    expect(save).not.toHaveBeenCalled()
+    expect(post).toHaveBeenCalledWith(
+      '/api/channel/pricing/import/preview',
+      expect.objectContaining({
+        type: 60,
+        group: 'vip',
+        base_url: 'https://prices.example',
+      }),
+      expect.anything()
+    )
+    await user.click(screen.getByRole('button', { name: 'Save models' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    const payload = transformFormDataToUpdatePayload(save.mock.calls[0][0], 1)
+    expect(payload.models).toBe('imported')
+    expect(payload.model_configs?.imported).toEqual({
+      billing_expression: expression,
+      pricing_source: source,
+    })
+    expect(JSON.parse(payload.settings ?? '{}').upstream_pricing).toEqual({
+      provider: 'newapi',
+      group: 'vip',
+    })
+  })
+  it('disables imports without a group or write permission and preserves the draft on failure', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: { success: false, message: 'Catalog unavailable' },
+    })
+    const save = renderForm(vi.fn(), { importPrices: true })
+    const user = userEvent.setup()
+    const group = screen.getByRole('textbox', {
+      name: 'Upstream pricing group',
+    })
+    await user.clear(group)
+    expect(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    ).toBeDisabled()
+    await user.type(group, 'vip')
+    await user.click(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Import group models and prices' })
+      ).toBeEnabled()
+    )
+    expect(
+      screen.queryByText(
+        'Import results are in the channel draft. Save the channel to apply them.'
+      )
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save models' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect(save.mock.calls[0][0].models).toBe('public.model-a,model-b')
+    expect(save.mock.calls[0][0].model_configs['model-b'].public_ratio).toBe(
+      0.8
+    )
+  })
+  it('preserves edits made while a price import is pending', async () => {
+    let complete: (response: unknown) => void = () => {}
+    vi.spyOn(api, 'post').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve
+        })
+    )
+    const save = renderForm(vi.fn(), { importPrices: true })
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    )
+    expect(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    ).toBeDisabled()
+    await user.click(
+      screen.getByRole('button', { name: 'Configure model: model-b' })
+    )
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Public ratio' }), {
+      target: { value: '.42' },
+    })
+    complete({
+      data: {
+        success: true,
+        data: {
+          models: ['remote'],
+          model_configs: { remote: { public_ratio: 0.1 } },
+          items: [],
+          removed: [],
+        },
+      },
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Import group models and prices' })
+      ).toBeEnabled()
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Configure model: remote' })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save models' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect(save.mock.calls[0][0].model_configs['model-b'].public_ratio).toBe(
+      0.42
+    )
+  })
+  it('disables the import action for read-only users', () => {
+    renderForm(vi.fn(), { importPrices: true, disabled: true })
+    expect(
+      screen.getByRole('textbox', { name: 'Upstream pricing group' })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    ).toBeDisabled()
+  })
   it('edits one model discount, ratio and observations without changing another model', async () => {
     const save = renderForm()
     const user = userEvent.setup()

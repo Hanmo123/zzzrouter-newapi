@@ -20,6 +20,7 @@ import { getGroups as getUserGroups } from '@/features/users/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import type { ChannelModelConfigs } from './lib/channel-token-pricing'
 import type { InferenceStatus } from './lib/inference-status'
 import type {
   AddChannelRequest,
@@ -49,6 +50,39 @@ const channelActionConfig = (
   skipBusinessError: true,
   skipErrorHandler: true,
 })
+
+export type ChannelPricingImport = {
+  models: string[]
+  model_configs: ChannelModelConfigs
+  items: Array<{
+    model: string
+    action: 'added' | 'updated' | 'unchanged' | 'conflict' | 'unsupported'
+    reason?: string
+    schedulable: boolean
+  }>
+  removed: string[]
+}
+
+export async function previewChannelPricingImport(
+  data: {
+    type: number
+    base_url: string
+    group: string
+    models: string
+    model_configs: ChannelModelConfigs
+  },
+  signal?: AbortSignal
+): Promise<ChannelPricingImport> {
+  const response = await api.post<{
+    success: boolean
+    data: ChannelPricingImport
+  }>(
+    '/api/channel/pricing/import/preview',
+    data,
+    channelActionConfig({ signal })
+  )
+  return requireServerSuccess(response.data).data
+}
 
 export async function getInferenceStatus(
   channelId: number,

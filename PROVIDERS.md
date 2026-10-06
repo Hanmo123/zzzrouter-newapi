@@ -20,11 +20,26 @@ Provider 不等于模型厂商 Vendor，不是租户或账户授权边界。名�
 | DELETE | `/api/providers/:id` | `channel.write`，无引用时软删除 |
 | GET | `/api/channel/`、`/api/channel/search`、渠道详情 | `channel.read`，支持 `provider_id`；返回 `model_configs`、`model_configs_revision` 和当前 `model_ratios` |
 | PUT | `/api/channel/` | `channel.write`，更新模型配置；凭据/协议敏感字段仍需 `channel.sensitive.write` |
+| POST | `/api/channel/pricing/import/preview` | `channel.write`，读取上游公开价格并返回渠道草稿；不保存或启用模型 |
 | POST | `/api/channel/model_config/preview` | `channel.read`，只读校验及倍率预览；请求 `{model, config}`，返回 `{public_ratio, schedulable}` |
 
 以上沿用 AdminAuth、既有身份认证与 `success/message/data` 响应。创建渠道继续要求敏感写入权限。字段变动进入管理审计。公开目录不提供写入接口。
 
 控制台「渠道 → 编辑 → 渠道模型与计费」显示可搜索的模型表格。点击模型行编辑独立公开倍率、上游折扣和观测；表达式模式复用系统原生表达式编辑器，并只读显示自动倍率。表格位于渠道配置草稿内，使用渠道的保存动作。渠道列表保留服务商、连接与路由信息，不再显示渠道级商业倍率或模型观测。
+
+## New API 分组价格导入
+
+New API 类型（60）支持填写「上游价格分组」，点击「导入分组模型与价格」，结果自动填入当前渠道的模型和计费草稿，保存渠道后才生效。分组来源保存在 `settings.upstream_pricing = {provider:"newapi", group:"vip"}`，与渠道本地路由 `group` 分开。此设置仍遵循 `settings` 的敏感写入权限；价格预览本身只要求 `channel.write`，不读取或发送渠道密钥。
+
+请求 `POST /api/channel/pricing/import/preview`：`{type:60, base_url, group, models, model_configs}`。后端读取 `/api/pricing`，按 `enable_groups` 筛选，并将 `group_ratio[group]` 合入金额。旧倍率价格通过上游 `/api/status` 的 `quota_per_unit` 转换，不使用本地额度单位。只接受固定、明确存在的分组，拒绝 `auto`。调用令牌必须实际绑定该上游分组；填写此字段不会改变上游令牌的配置。
+
+原生 Token 表达式完整保留上下文阶梯、请求条件及显式零价。只有完整条件树及各档 Token 单价均可证明与本地系统计费成相同比例时才保存 `public_ratio`，否则保存含上游分组倍率的 `billing_expression`；不会用基础档报价代替完整比较，也不会修改上下文阈值。无法证明的表达式保留原式。按次表达式的金额只缩放 `fixed()` 字面量。有效但没有可比较系统价的表达式会导入并提示不参与调度；任务用量表达式 `u()` 仍受现有渠道 Token 计费边界限制。旧式音频价格缺少完整端点语义时报告需要上游表达式，不猜测价格。
+
+响应包含合并后的 `models`、`model_configs`、逐模型 `items`（added/updated/unchanged/conflict/unsupported）及 `removed`。新增和更新保留模型采购折扣与观测；手动修改的价格不覆盖，上游消失的模型只提示、不删除。非法、缺失或重复价格不以默认倍率补齐。渠道保存使用现有事务更新模型配置及 abilities，携带 `model_configs_revision` 检查旧草稿。同步来源启用时停用仅自动添加模型的功能，避免无价格的新模型先进入路由。
+
+每个导入配置的 `pricing_source` 保存来源类型、地址、分组、含分组倍率的完整源表达式、内容摘要、导入时间以及上次应用的表达式或倍率。重复导入没有变化时保持原快照；再次同步会按当前本地系统价重新推导倍率。**尚未启用定时任务**，本地系统价变化后需要再次手动导入；手工倍率在两次同步之间仍遵循现有计费语义。后续定时任务可调用 `service.FetchNewAPIPrices` 及同一归一化/合并流程，再在渠道事务中检查版本并应用，复用现有系统任务租约和执行记录。
+
+首个适配器读取公开目录，受已有 SSRF 策略、请求超时、响应大小和模型数量限制保护。账户专属价格、充值优惠、上游额外服务费及未导出的渠道独立价格不在公开目录价格中，不能将目录导入视为上游最终账单的完整复刻。私有目录会报错，未来需要单独的账户价格认证契约，不复用模型调用密钥。公开渠道 DTO 不返回 `pricing_source`。
 
 ## 模型配置
 

@@ -60,6 +60,7 @@ func registerProviderRoutes(apiRouter *gin.RouterGroup) {
 var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/", permission: authz.ChannelRead, handler: controller.GetAllChannels},
 	{method: http.MethodGet, path: "/search", permission: authz.ChannelRead, handler: controller.SearchChannels},
+	{method: http.MethodPost, path: "/pricing/import/preview", permission: authz.ChannelWrite, handler: controller.PreviewChannelPricingImport},
 	{method: http.MethodPost, path: "/model_config/preview", permission: authz.ChannelRead, handler: controller.PreviewChannelModelConfig},
 	{method: http.MethodGet, path: "/models", permission: authz.ChannelRead, handler: controller.ChannelListModels},
 	{method: http.MethodGet, path: "/default_base_urls", permission: authz.ChannelRead, handler: controller.GetChannelDefaultBaseURLs},

@@ -168,6 +168,12 @@ func TestChannelModelDatabaseAndRouting(t *testing.T) {
 				{Name: ".15", Models: "quoted", Key: "private", Group: "default", ProviderID: p.ID, ModelConfigs: model.ChannelModelConfigs{"quoted": {PublicRatio: common.GetPointer(.15)}}},
 				{Name: "excluded", Models: "quoted", Key: "private", Group: "default", ProviderID: p.ID, ModelConfigs: model.ChannelModelConfigs{"quoted": {BillingExpression: `tier("request",fixed(1))`}}},
 			}
+			importedSource := &model.ChannelModelPricingSource{Provider: "newapi", BaseURL: "https://prices.example", Group: "vip", Expression: `tier("base",p*3.5+c*14)`, SourceHash: "snapshot", FetchedAt: 100, AppliedRatio: common.GetPointer(.14)}
+			imported := channels[0].ModelConfigs["quoted"]
+			imported.PricingSource = importedSource
+			channels[0].ModelConfigs["quoted"] = imported
+			channels[0].Type = constant.ChannelTypeNewAPI
+			channels[0].SetOtherSettings(dto.ChannelOtherSettings{UpstreamPricing: &dto.UpstreamPricingSource{Provider: "newapi", Group: "vip"}})
 			for i := range channels {
 				require.NoError(t, channels[i].Insert())
 			}
@@ -177,6 +183,8 @@ func TestChannelModelDatabaseAndRouting(t *testing.T) {
 			}
 			loaded, err := model.GetChannelById(channels[0].Id, true)
 			require.NoError(t, err)
+			assert.Equal(t, importedSource, loaded.ModelConfig("quoted").PricingSource)
+			assert.Equal(t, "vip", loaded.GetOtherSettings().UpstreamPricing.Group)
 			assert.Equal(t, .14, loaded.ModelConfig("quoted").ChargeRatio())
 			assert.Equal(t, 1.0, loaded.ModelConfig("other").ChargeRatio())
 			// Whole-interval multiplier filtering and worst-rate floor; discounts do not
@@ -225,6 +233,8 @@ func TestChannelModelDatabaseAndRouting(t *testing.T) {
 			assert.NotContains(t, string(encoded), "upstream_discount")
 			assert.NotContains(t, string(encoded), "private")
 			assert.NotContains(t, string(encoded), "billing_expression")
+			assert.NotContains(t, string(encoded), "pricing_source")
+			assert.NotContains(t, string(encoded), "prices.example")
 			// A settings update cannot delete model billing; explicit empty map clears it.
 			loaded.SetOtherSettings(dto.ChannelOtherSettings{AllowSpeed: true})
 			require.NoError(t, loaded.Update())

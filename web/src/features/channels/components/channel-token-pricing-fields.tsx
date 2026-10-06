@@ -180,7 +180,7 @@ export function ChannelTokenPricingFields(props: {
             />
             {selected && names.includes(selected) && (
               <ChannelModelEditor
-                key={selected}
+                key={`${selected}:${selectedConfig.pricing_source?.source_hash ?? ''}:${selectedConfig.pricing_source?.applied_expression ?? ''}:${selectedConfig.pricing_source?.applied_ratio ?? ''}`}
                 model={selected}
                 value={selectedConfig}
                 disabled={props.disabled}

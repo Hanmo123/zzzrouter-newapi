@@ -20,13 +20,27 @@ import (
 // ChannelModelConfig belongs to one channel and one public model. Observations are
 // nullable; billing settings never use a channel-wide fallback.
 type ChannelModelConfig struct {
-	UpstreamDiscount  *float64 `json:"upstream_discount,omitempty"`
-	PublicRatio       *float64 `json:"public_ratio,omitempty"`
-	BillingExpression string   `json:"billing_expression,omitempty"`
-	IsDegraded        *bool    `json:"is_degraded"`
-	IsOnline          *bool    `json:"is_online"`
-	TTFTMs            *int64   `json:"ttft_ms"`
-	LastCheckedAt     *int64   `json:"last_checked_at"`
+	PricingSource     *ChannelModelPricingSource `json:"pricing_source,omitempty"`
+	UpstreamDiscount  *float64                   `json:"upstream_discount,omitempty"`
+	PublicRatio       *float64                   `json:"public_ratio,omitempty"`
+	BillingExpression string                     `json:"billing_expression,omitempty"`
+	IsDegraded        *bool                      `json:"is_degraded"`
+	IsOnline          *bool                      `json:"is_online"`
+	TTFTMs            *int64                     `json:"ttft_ms"`
+	LastCheckedAt     *int64                     `json:"last_checked_at"`
+}
+
+// ChannelModelPricingSource is a public-price snapshot, never a credential.
+// Applied fields let future synchronization distinguish manual edits from imports.
+type ChannelModelPricingSource struct {
+	Provider          string   `json:"provider"`
+	BaseURL           string   `json:"base_url"`
+	Group             string   `json:"group"`
+	Expression        string   `json:"expression"`
+	SourceHash        string   `json:"source_hash"`
+	FetchedAt         int64    `json:"fetched_at"`
+	AppliedExpression string   `json:"applied_expression,omitempty"`
+	AppliedRatio      *float64 `json:"applied_ratio,omitempty"`
 }
 
 type ChannelModelConfigs map[string]ChannelModelConfig
@@ -76,6 +90,14 @@ func (config ChannelModelConfig) ChargeRatio() float64 {
 	return *config.PublicRatio
 }
 func (config ChannelModelConfig) Validate() error {
+	if source := config.PricingSource; source != nil {
+		if source.Provider != "newapi" || len(source.BaseURL) > 2048 || len(source.Group) > 128 || len(source.Expression) > 16384 || len(source.AppliedExpression) > 16384 || source.FetchedAt < 0 {
+			return errors.New("invalid model pricing source")
+		}
+		if source.AppliedRatio != nil && (*source.AppliedRatio < 0 || math.IsNaN(*source.AppliedRatio) || math.IsInf(*source.AppliedRatio, 0)) {
+			return errors.New("invalid imported ratio")
+		}
+	}
 	if value := config.Discount(); math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
 		return errors.New("upstream_discount must be between 0 and 1")
 	}

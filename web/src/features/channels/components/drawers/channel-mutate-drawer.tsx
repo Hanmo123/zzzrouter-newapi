@@ -208,6 +208,7 @@ import {
 import type { Channel } from '../../types'
 import { ChannelDegradationExclusion } from '../channel-degradation-exclusion'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
+import { ChannelPricingImportFields } from '../channel-pricing-import-fields'
 import { ChannelProviderFields } from '../channel-provider-fields'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTokenPricingFields } from '../channel-token-pricing-fields'
@@ -316,6 +317,7 @@ const SENSITIVE_FORM_FIELDS = [
   'claude_beta_query',
   'ollama_openai_chat',
   'disable_task_polling_sleep',
+  'upstream_pricing_group',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
@@ -2601,6 +2603,16 @@ export function ChannelMutateDrawer({
         </div>
 
         <ChannelProviderFields control={form.control} />
+        <ChannelPricingImportFields
+          sourceLocked={sensitiveLocked}
+          disabled={
+            !hasPermission(
+              currentUser,
+              ADMIN_PERMISSION_RESOURCES.CHANNEL,
+              ADMIN_PERMISSION_ACTIONS.WRITE
+            )
+          }
+        />
         <ChannelTokenPricingFields
           control={form.control}
           saved={channelData?.data}
