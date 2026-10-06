@@ -108,7 +108,7 @@ func ListPublicModels(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "public catalog is temporarily unavailable"})
 		return
 	}
-	board := setting.GetHomepageBoardConfig()
+	board := setting.DefaultHomepageBoardConfig()
 	common.ApiSuccess(c, &struct {
 		*common.PageInfo
 		DefaultModel   string   `json:"default_model"`
@@ -118,6 +118,20 @@ func ListPublicModels(c *gin.Context) {
 		DefaultModel:   board.DefaultModel,
 		HomepageModels: board.Models,
 	})
+}
+
+func GetPublicPlatformStatistics(c *gin.Context) {
+	if c.Request.URL.RawQuery != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "query parameters are not supported"})
+		return
+	}
+	data, err := model.GetPublicPlatformStatistics(c.Request.Context(), time.Now())
+	if err != nil {
+		common.SysError("could not read public platform statistics: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "platform statistics are temporarily unavailable"})
+		return
+	}
+	common.ApiSuccess(c, data)
 }
 
 func GetPublicProviderHistory(c *gin.Context) {

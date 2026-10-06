@@ -50,12 +50,12 @@ func parseDailyUsageQuery(c *gin.Context, defaultDays int, managed bool) (int, t
 }
 
 func GetPublicDailyUsage(c *gin.Context) {
-	days, end, err := parseDailyUsageQuery(c, 365, false)
+	days, _, err := parseDailyUsageQuery(c, 365, false)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	data, err := model.ListDailyUsageEnding(c.Request.Context(), days, end)
+	data, err := model.ListPublicConsumptionDailyUsage(c.Request.Context(), days, time.Now())
 	if err != nil {
 		common.SysError("could not read public daily usage: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "daily usage is temporarily unavailable"})

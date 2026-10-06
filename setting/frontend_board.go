@@ -8,7 +8,7 @@ import (
 )
 
 const HomepageBoardOptionKey = "frontend.homepage_board"
-const DefaultHomepageBoardModel = "gpt-6-astra"
+const DefaultHomepageBoardModel = "gpt-6.1-sol"
 
 // An empty Models list keeps the legacy behavior: show the public directory
 // (up to the homepage's existing 100-item limit). A configured list is

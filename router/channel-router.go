@@ -46,6 +46,7 @@ func registerPublicCatalogRoutes(apiRouter *gin.RouterGroup) {
 	catalog.GET("/channels", controller.ListPublicChannels)
 	catalog.GET("/models", controller.ListPublicModels)
 	catalog.GET("/usage/daily", controller.GetPublicDailyUsage)
+	catalog.GET("/platform", controller.GetPublicPlatformStatistics)
 }
 
 func registerProviderRoutes(apiRouter *gin.RouterGroup) {

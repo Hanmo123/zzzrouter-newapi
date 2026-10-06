@@ -90,12 +90,15 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			sqlDB.SetMaxOpenConns(1)
 			previousDB, previousType := model.DB, common.MainDatabaseType()
-			model.DB = db
+			previousLogDB, previousLogType := model.LOG_DB, common.LogDatabaseType()
+			model.DB, model.LOG_DB = db, db
 			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			common.SetLogDatabaseType(common.DatabaseType(dialect))
 			t.Cleanup(func() {
-				require.NoError(t, db.Migrator().DropTable(&model.PublicDailyUsage{}, &model.AuditLog{}, &model.User{}, &model.ChannelDegradationSample{}, &model.Channel{}, &model.Provider{}))
-				model.DB = previousDB
+				require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.PublicDailyUsage{}, &model.AuditLog{}, &model.User{}, &model.ChannelDegradationSample{}, &model.Channel{}, &model.Provider{}))
+				model.DB, model.LOG_DB = previousDB, previousLogDB
 				common.SetMainDatabaseType(previousType)
+				common.SetLogDatabaseType(previousLogType)
 				require.NoError(t, sqlDB.Close())
 			})
 			var version string
@@ -105,7 +108,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			}
 			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 			t.Logf("database version: %s", version)
-			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}, &model.PublicDailyUsage{}, &model.User{}, &model.AuditLog{}))
+			require.NoError(t, db.AutoMigrate(&model.Provider{}, &model.Channel{}, &model.ChannelDegradationSample{}, &model.PublicDailyUsage{}, &model.Log{}, &model.User{}, &model.AuditLog{}))
 			providers := []model.Provider{
 				{ID: 101, Code: "private-code-a", Name: "Provider A", Description: "private-provider-description"},
 				{ID: 102, Code: "private-code-b", Name: "Provider B", Description: "private-provider-description"},
@@ -150,6 +153,96 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 			registerPublicCatalogRoutes(api)
 			registerProviderRoutes(api)
 			registerChannelRoutes(api)
+
+			t.Run("platform statistics and daily tokens come from current public facts and the separate log store", func(t *testing.T) {
+				now := time.Now().UTC()
+				stats, err := model.GetPublicPlatformStatistics(context.Background(), now)
+				require.NoError(t, err)
+				assert.EqualValues(t, 2, stats.Providers)
+				assert.EqualValues(t, 10, stats.Channels)
+				assert.EqualValues(t, 2, stats.Models)
+				assert.Zero(t, stats.Evaluations24h)
+				assert.Nil(t, stats.Latest)
+				var visible, disabled model.Channel
+				require.NoError(t, db.First(&visible, "id = ?", 1).Error)
+				require.NoError(t, db.First(&disabled, "id = ?", 11).Error)
+				zero := int64(0)
+				for i, instance := range []string{*visible.InstanceID, *disabled.InstanceID, "stale-copy-instance", *visible.InstanceID} {
+					provider := 101
+					started := now.UnixMilli() - 1000
+					if i == 3 {
+						started = now.Add(24 * time.Hour).UnixMilli()
+					}
+					require.NoError(t, db.Create(&model.ChannelDegradationSample{ID: fmt.Sprintf("platform-fact-%d", i), ChannelInstanceID: instance, ChannelID: 1, ProviderID: provider, Model: "model-a", State: "normal", StartedAt: started, CompletedAt: started, TTFTMs: &zero}).Error)
+				}
+				t.Cleanup(func() {
+					require.NoError(t, db.Where("id LIKE ?", "platform-fact-%").Delete(&model.ChannelDegradationSample{}).Error)
+				})
+				recorder := httptest.NewRecorder()
+				engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/public/platform", nil))
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				var reply struct {
+					Data model.PublicPlatformStatistics `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply))
+				assert.EqualValues(t, 1, reply.Data.Evaluations24h)
+				require.NotNil(t, reply.Data.Latest)
+				require.NotNil(t, reply.Data.Latest.TTFTMs)
+				assert.Zero(t, *reply.Data.Latest.TTFTMs)
+				for _, secret := range []string{"private-key-canary", "private.example", "instance", "provider_name", "error_code", "upstream_ratio"} {
+					assert.NotContains(t, recorder.Body.String(), secret)
+				}
+				logDriver := driver
+				if dialect == "sqlite" {
+					logDriver = sqlite.Open(filepath.Join(t.TempDir(), "separate-log.db"))
+				}
+				logs, err := gorm.Open(logDriver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: "platform_log_test_"}})
+				require.NoError(t, err)
+				sqlLogs, err := logs.DB()
+				require.NoError(t, err)
+				sqlLogs.SetMaxOpenConns(1)
+				require.NoError(t, logs.AutoMigrate(&model.Log{}))
+				oldLogs := model.LOG_DB
+				model.LOG_DB = logs
+				t.Cleanup(func() {
+					model.LOG_DB = oldLogs
+					require.NoError(t, logs.Migrator().DropTable(&model.Log{}))
+					require.NoError(t, sqlLogs.Close())
+				})
+				day := now.Truncate(24*time.Hour).AddDate(0, 0, -1).Unix()
+				require.NoError(t, logs.Create(&[]model.Log{
+					{Type: model.LogTypeConsume, CreatedAt: day, PromptTokens: 1100000000000, CompletionTokens: 23, Username: "private-log-user", Content: "private-log-content", Other: "private-log-other"},
+					{Type: model.LogTypeConsume, CreatedAt: day - 86400, PromptTokens: 0, CompletionTokens: 0},
+					{Type: model.LogTypeConsume, CreatedAt: day + 86400, PromptTokens: 999},
+					{Type: model.LogTypeConsume, CreatedAt: day + 172800, PromptTokens: 888},
+					{Type: model.LogTypeError, CreatedAt: day, PromptTokens: 999999},
+					{Type: model.LogTypeRefund, CreatedAt: day, PromptTokens: 999999},
+					{Type: model.LogTypeConsume, CreatedAt: day, PromptTokens: -1},
+				}).Error)
+				usage, err := model.ListPublicConsumptionDailyUsage(context.Background(), 7, now)
+				require.NoError(t, err)
+				assert.EqualValues(t, 1100000000023, usage.Total)
+				assert.Equal(t, "consumption_logs", usage.Source)
+				assert.Equal(t, 2, usage.RecordedDays)
+				require.Len(t, usage.Items, 7)
+				assert.Nil(t, usage.Items[0].TokenCount)
+				require.NotNil(t, usage.Items[5].TokenCount)
+				assert.Zero(t, *usage.Items[5].TokenCount)
+				recorder = httptest.NewRecorder()
+				engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/public/usage/daily?days=7", nil))
+				require.Equal(t, http.StatusOK, recorder.Code)
+				for _, secret := range []string{"username", "private-log-user", "private-log-content", "private-log-other", "quota", "request_id"} {
+					assert.NotContains(t, recorder.Body.String(), secret)
+				}
+				require.NoError(t, logs.Create(&model.Log{Type: model.LogTypeConsume, CreatedAt: day, PromptTokens: 9007199254740992}).Error)
+				_, err = model.ListPublicConsumptionDailyUsage(context.Background(), 7, now)
+				require.Error(t, err, "unsafe totals must never be silently rounded")
+				recorder = httptest.NewRecorder()
+				engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/public/usage/daily?days=7", nil))
+				assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+				assert.NotContains(t, recorder.Body.String(), "9007199254740992")
+				assert.NotContains(t, recorder.Body.String(), "safe public integer")
+			})
 
 			t.Run("channel sorting filtering and pagination", func(t *testing.T) {
 				for _, scenario := range []struct {
@@ -333,7 +426,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					assert.True(t, options.Success)
 					assert.Equal(t, scenario.total, options.Data.Total)
 					assert.Equal(t, scenario.models, options.Data.Items)
-					assert.Equal(t, "gpt-6-astra", options.Data.DefaultModel)
+					assert.Equal(t, "gpt-6.1-sol", options.Data.DefaultModel)
 					assert.Equal(t, []string{}, options.Data.HomepageModels)
 				}
 			})
@@ -371,8 +464,8 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					} `json:"data"`
 				}
 				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &reply))
-				assert.Equal(t, []string{"model-b", "model-a"}, reply.Data.HomepageModels)
-				assert.Equal(t, "model-b", reply.Data.DefaultModel)
+				assert.Empty(t, reply.Data.HomepageModels)
+				assert.Equal(t, "gpt-6.1-sol", reply.Data.DefaultModel)
 				assert.Equal(t, []string{"model-a", "model-b"}, reply.Data.Items)
 				assert.Equal(t, 2, reply.Data.Total)
 			})
@@ -498,7 +591,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				}
 			})
 
-			t.Run("manual daily usage is root-managed, portable and excludes today from public reads", func(t *testing.T) {
+			t.Run("legacy manual storage remains portable but public usage only reads consumption logs", func(t *testing.T) {
 				previousLogDB, previousRedis := model.LOG_DB, common.RedisEnabled
 				model.LOG_DB, common.RedisEnabled = db, false
 				defer func() { model.LOG_DB, common.RedisEnabled = previousLogDB, previousRedis }()
@@ -510,6 +603,12 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				now := time.Now().UTC()
 				today, yesterday := now.Format("2006-01-02"), now.AddDate(0, 0, -1).Format("2006-01-02")
 				dayBefore := now.AddDate(0, 0, -2).Format("2006-01-02")
+				require.NoError(t, db.Create(&[]model.Log{
+					{Type: model.LogTypeConsume, CreatedAt: now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1).Unix(), PromptTokens: 100, CompletionTokens: 23, Username: "private-token-user", Other: "private-log-payload"},
+					{Type: model.LogTypeConsume, CreatedAt: now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -2).Unix(), PromptTokens: 0, CompletionTokens: 0},
+					{Type: model.LogTypeConsume, CreatedAt: now.UTC().Truncate(24 * time.Hour).Unix(), PromptTokens: 999},
+					{Type: model.LogTypeError, CreatedAt: now.UTC().Truncate(24*time.Hour).AddDate(0, 0, -1).Unix(), PromptTokens: 999999},
+				}).Error)
 				body := fmt.Sprintf(`{"items":[{"date":%q,"token_count":123},{"date":%q,"token_count":0},{"date":%q,"token_count":999}],"updated_by":91}`, yesterday, dayBefore, today)
 				request := func(method, path, body, token string) *httptest.ResponseRecorder {
 					recorder := httptest.NewRecorder()
@@ -583,6 +682,11 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					assert.Len(t, reply.Data.Items, 7)
 					assert.Nil(t, reply.Data.Items[0].TokenCount)
 					assert.Equal(t, "tokens", reply.Data.Unit)
+					if strings.HasPrefix(scenario.path, "/api/public/") {
+						assert.Equal(t, "consumption_logs", reply.Data.Source)
+					}
+					assert.NotContains(t, recorder.Body.String(), "private-log-payload")
+					assert.NotContains(t, recorder.Body.String(), "private-token-user")
 					assert.NotContains(t, recorder.Body.String(), "request_count")
 					assert.NotContains(t, recorder.Body.String(), "updated_by")
 					assert.NotContains(t, recorder.Body.String(), "private-usage-editor")
@@ -619,6 +723,12 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				// Correction is an upsert, not a duplicate or an additive increment.
 				correction := fmt.Sprintf(`{"items":[{"date":%q,"token_count":7}]}`, yesterday)
 				require.Equal(t, http.StatusOK, request(http.MethodPut, "/api/option/daily_usage", correction, root).Code)
+				publicAfterManual := request(http.MethodGet, "/api/public/usage/daily?days=7", "", "")
+				var actual struct {
+					Data model.PublicDailyUsageSeries `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(publicAfterManual.Body.Bytes(), &actual))
+				assert.EqualValues(t, 123, actual.Data.Total, "manual corrections must not replace actual consumption totals")
 				for _, invalid := range []string{
 					`{"items":[]}`, `{"items":[{"date":"bad","token_count":1}]}`,
 					fmt.Sprintf(`{"items":[{"date":%q,"token_count":-1}]}`, yesterday),
@@ -645,7 +755,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 				assert.Nil(t, series.Items[6].TokenCount, "deletion restores missing, not a fabricated zero")
 				require.NotNil(t, series.Items[5].TokenCount)
 				assert.EqualValues(t, 0, *series.Items[5].TokenCount)
-				// Today's manually stored value becomes public on the next UTC day.
+				// The retained archive helper can read this value next day, not the public consumption API.
 				next, err := model.ListPublicDailyUsage(context.Background(), 7, false, now.AddDate(0, 0, 1))
 				require.NoError(t, err)
 				assert.EqualValues(t, 999, *next.Items[6].TokenCount)
@@ -664,6 +774,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 
 			t.Run("invalid and private query inputs are rejected", func(t *testing.T) {
 				for _, path := range []string{
+					"/api/public/platform?model=x", "/api/public/platform?fields=key", "/api/public/platform?days=7&days=30", "/api/public/platform?to=2999-01-01",
 					"/api/public/channels?sort_by=upstream_ratio", "/api/public/channels?sort_by=key",
 					"/api/public/channels?model=", "/api/public/channels?model=a%2Cb", "/api/public/channels?model=%0A",
 					"/api/public/channels?model=model-a&model=model-b", "/api/public/models?model=model-a", "/api/public/models?sort_by=ttft", "/api/public/models?search=%20", "/api/public/channels?search=model-a", "/api/public/models?search=x&search=y",
@@ -704,7 +815,7 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 					require.NoError(t, db.Callback().Query().Remove(name))
 					require.NoError(t, db.Callback().Row().Remove(name))
 				}()
-				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels", "/api/public/providers/101/history", "/api/public/usage/daily"} {
+				for _, path := range []string{"/api/public/providers", "/api/public/channels", "/api/public/providers/101/channels", "/api/public/providers/101/history", "/api/public/usage/daily", "/api/public/platform"} {
 					recorder, reply := requestPublicCatalog(t, engine, path)
 					assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 					assert.False(t, reply.Success)
@@ -712,6 +823,8 @@ func TestPublicCatalogDatabaseMatrix(t *testing.T) {
 						assert.Equal(t, "daily usage is temporarily unavailable", reply.Message)
 					} else if strings.HasSuffix(path, "/history") {
 						assert.Equal(t, "evaluation history is temporarily unavailable", reply.Message)
+					} else if strings.HasSuffix(path, "/platform") {
+						assert.Equal(t, "platform statistics are temporarily unavailable", reply.Message)
 					} else {
 						assert.Equal(t, "public catalog is temporarily unavailable", reply.Message)
 					}

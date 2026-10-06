@@ -116,7 +116,7 @@ GET /api/public/channels?is_online=false&is_degraded=all
 GET /api/public/channels?is_online=all&is_degraded=all
 ```
 
-响应沿用 `success/message/data`，分页数据包含 `page`、`page_size`、`total`、`items`。模型选项接口在 `data` 中额外返回 `default_model` 和 `homepage_models`，可在控制台「前端配置 → 首页实时质量榜」设置。未配置时默认模型为 `gpt-6-astra`，`homepage_models: []` 表示首页沿用公开模型目录（最多 100 项）；指定列表仅影响首页展示，不限制完整榜单的搜索和筛选。即使默认模型暂时没有匹配的已公开渠道，默认名称仍会返回。它不代表探测结果或可用性。渠道条目严格限定为：
+响应沿用 `success/message/data`，分页数据包含 `page`、`page_size`、`total`、`items`。模型选项接口在 `data` 中额外返回 `default_model` 和 `homepage_models`，当前默认模型固定为 `gpt-6.1-sol`，`homepage_models: []` 表示首页沿用真实公开模型目录（最多 100 项），不再使用存储中的手动首页配置或提供覆盖表单。首页及 `/usage` 的平台概览读取匿名 `/api/public/platform`，每日 Token 总量从 LOG_DB 的实际消费日志自动聚合，旧手工数值与管理读写入口已停用；详见[平台数据行为](docs/channel/provider-behavior.md#8-全站每日-token-用量与可拖拽后台编辑器)。即使默认模型暂时没有匹配的已公开渠道，默认名称仍会返回。它不代表探测结果或可用性。渠道条目严格限定为：
 
 ```json
 {
