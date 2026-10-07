@@ -1,5 +1,8 @@
 {
   "translation": {
+    "360": "360",
+    "1000": "1000",
+    "10000": "10000",
     "Channel models and billing": "渠道模型与计费",
     "Configure model: {{model}}": "配置模型：{{model}}",
     "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "每个对外模型独立配置价格和观测数据。用户扣费最后乘分组倍率；采购成本不含服务费和分组倍率。",
@@ -79,9 +82,6 @@
     "Provider description must not exceed 4096 characters": "服务商描述不能超过 4096 个字符",
     "the default provider cannot be deleted": "默认服务商不能删除",
     "reassign or delete this provider's channels first": "请先转移或删除此服务商下的渠道",
-    "360": "360",
-    "1000": "1000",
-    "10000": "10000",
     "_copy": "_复制",
     "，": "，",
     ", and": "，和",
@@ -6923,6 +6923,17 @@
     "Use input/output price": "使用输入/输出单价",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Token 单价必须在 0 至 1000000000 美元/百万 Token 之间。",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "用户计费基础价，单位为美元/百万 Token，尚未乘分组倍率、公开倍率与服务费。按对外模型名称精确匹配，不使用映射后的上游名称。",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "输入与输出单价必填。可选类别留空时按输入/输出单价计费，不继承系统价格；显式填写 0 表示免费。缓存写入（5 分钟/通用）与 1 小时可分别定价。关闭覆盖后恢复系统定价。"
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "输入和输出价格为必填项。可选类别留空时使用输入/输出价格，不使用系统价格。显式零价表示免费。缓存写入（5分钟/默认）和1小时缓存可单独定价。关闭覆盖后恢复系统价格。",
+    "Price comparison: {{model}}": "价格对比：{{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "系统价格是当前本地参考价。上游价格已包含导入的分组倍率。",
+    "Upstream group": "上游分组",
+    "Not schedulable": "不可参与调度",
+    "System price": "系统价格",
+    "Upstream price": "上游价格",
+    "Channel price": "渠道价格",
+    "No comparable token prices": "没有可比较的 Token 价格",
+    "System expression": "系统表达式",
+    "Upstream expression": "上游表达式",
+    "Channel expression": "渠道表达式"
   }
 }

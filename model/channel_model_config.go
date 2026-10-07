@@ -239,9 +239,36 @@ func tokenPriceParent(variable string) string {
 	return "p"
 }
 
+func CompleteTokenPrices(prices map[string]float64) map[string]float64 {
+	result := maps.Clone(prices)
+	if _, exists := result["cc1h"]; !exists {
+		if price, exists := result["cc"]; exists {
+			result["cc1h"] = price
+		} else if price, exists := result["p"]; exists {
+			result["cc1h"] = price
+		}
+	}
+	return result
+}
+
 // SystemTokenPrices uses the same model identity candidates and administrator
 // overrides as relay pricing. It reads current settings, so changing system
 // prices immediately changes quotations without rewriting channel expressions.
+// SystemBillingExpression returns the configured native system expression when
+// one exists. Legacy ratio pricing is represented by SystemTokenPrices instead.
+func SystemBillingExpression(name string) string {
+	candidates := append([]string{name}, hostreasoning.CanonicalBillingModelNames(name)...)
+	candidates = append(candidates, hostreasoning.BaseModelName(name))
+	for _, candidate := range slices.Compact(candidates) {
+		if billing_setting.GetBillingMode(candidate) == billing_setting.BillingModeTieredExpr {
+			if expression, found := billing_setting.GetBillingExpr(candidate); found {
+				return expression
+			}
+		}
+	}
+	return ""
+}
+
 func SystemTokenPrices(name string) (map[string]float64, bool) {
 	return systemTokenPricesForServiceTier(name, "")
 }

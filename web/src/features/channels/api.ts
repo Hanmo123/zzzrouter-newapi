@@ -51,6 +51,28 @@ const channelActionConfig = (
   skipErrorHandler: true,
 })
 
+export type ChannelModelPricePreview = {
+  public_ratio: { min: number; max: number } | null
+  schedulable: boolean
+  system_prices: Record<string, number> | null
+  upstream_prices: Record<string, number> | null
+  channel_prices: Record<string, number> | null
+  system_expression: string
+  upstream_expression: string
+  channel_expression: string
+  upstream_group: string
+}
+
+export async function previewChannelModelConfig(
+  data: { model: string; config: ChannelModelConfigs[string] },
+  signal?: AbortSignal
+): Promise<ChannelModelPricePreview> {
+  const response = await api.post<{
+    success: boolean
+    data: ChannelModelPricePreview
+  }>('/api/channel/model_config/preview', data, { signal })
+  return requireServerSuccess(response.data).data
+}
 export type ChannelPricingImport = {
   models: string[]
   model_configs: ChannelModelConfigs

@@ -6807,6 +6807,17 @@
     "Use input/output price": "Utiliser le prix d’entrée/sortie",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Les prix doivent être compris entre 0 et 1000000000 USD par million de tokens.",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Prix de base facturés au client en USD par million de tokens, avant les multiplicateurs de groupe et public et les frais de service. Correspondance exacte des noms publics, sans mapping amont.",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Les prix d’entrée et de sortie sont obligatoires. Les catégories facultatives vides utilisent ces prix, pas les tarifs système. Un zéro explicite est gratuit. Les écritures de cache (5 min/par défaut) et 1 h ont des prix indépendants. Désactivez le remplacement pour rétablir les tarifs système."
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Les prix d’entrée et de sortie sont obligatoires. Les catégories facultatives vides utilisent ces prix, pas les tarifs système. Un zéro explicite est gratuit. Les écritures de cache (5 min/par défaut) et 1 h ont des prix indépendants. Désactivez le remplacement pour rétablir les tarifs système.",
+    "Price comparison: {{model}}": "Comparaison des prix : {{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "Les prix système sont la référence locale actuelle. Les prix amont incluent le coefficient de groupe importé.",
+    "Upstream group": "Groupe amont",
+    "Not schedulable": "Non éligible au routage",
+    "System price": "Prix système",
+    "Upstream price": "Prix amont",
+    "Channel price": "Prix du canal",
+    "No comparable token prices": "Aucun prix de tokens comparable",
+    "System expression": "Expression système",
+    "Upstream expression": "Expression amont",
+    "Channel expression": "Expression du canal"
   }
 }

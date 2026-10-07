@@ -44,6 +44,10 @@ import {
   type ModelRatioRange,
 } from '../lib/channel-token-pricing'
 import { ChannelObservationFields } from './channel-observation-fields'
+import {
+  ChannelModelNameButton,
+  ChannelPricingComparisonDialog,
+} from './channel-pricing-comparison-dialog'
 
 const ExpressionEditor = lazy(() =>
   import('@/features/system-settings/models/tiered-pricing-editor').then(
@@ -59,6 +63,7 @@ export function ChannelModelEditor(props: {
 }) {
   const { t } = useTranslation()
   const id = useId()
+  const [comparisonOpen, setComparisonOpen] = useState(false)
   const expression = props.value.billing_expression ?? ''
   const [expressionMode, setExpressionMode] = useState(Boolean(expression))
   const [source, setSource] = useState(expression)
@@ -90,7 +95,12 @@ export function ChannelModelEditor(props: {
       aria-label={props.model}
       className='flex flex-col gap-4 rounded-lg border p-4'
     >
-      <h3 className='font-medium break-all'>{props.model}</h3>
+      <h3 className='font-medium break-all'>
+        <ChannelModelNameButton
+          model={props.model}
+          onClick={() => setComparisonOpen(true)}
+        />
+      </h3>
       <FieldGroup className='grid sm:grid-cols-2'>
         <Field>
           <FieldLabel htmlFor={`${id}-discount`}>
@@ -232,6 +242,12 @@ export function ChannelModelEditor(props: {
         value={props.value}
         onChange={props.onChange}
         disabled={props.disabled}
+      />
+      <ChannelPricingComparisonDialog
+        model={props.model}
+        config={props.value}
+        open={comparisonOpen}
+        onOpenChange={setComparisonOpen}
       />
     </section>
   )

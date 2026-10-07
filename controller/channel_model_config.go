@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
@@ -24,5 +25,34 @@ func PreviewChannelModelConfig(c *gin.Context) {
 		return
 	}
 	ratio := request.Config.ModelPublicRatio(request.Model)
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"public_ratio": ratio, "schedulable": ratio != nil}})
+	upstreamPrices := map[string]float64(nil)
+	upstreamExpression := ""
+	if source := request.Config.PricingSource; source != nil {
+		upstreamExpression = source.Expression
+		upstreamPrices, _ = billingexpr.BaseTokenPrices(source.Expression)
+		upstreamPrices = model.CompleteTokenPrices(upstreamPrices)
+	}
+	systemPrices, _ := model.SystemTokenPrices(request.Model)
+	systemPrices = model.CompleteTokenPrices(systemPrices)
+	channelPrices := map[string]float64(nil)
+	if request.Config.BillingExpression != "" {
+		channelPrices, _ = billingexpr.BaseTokenPrices(request.Config.BillingExpression)
+		channelPrices = model.CompleteTokenPrices(channelPrices)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"public_ratio":        ratio,
+		"schedulable":         ratio != nil,
+		"system_prices":       systemPrices,
+		"upstream_prices":     upstreamPrices,
+		"channel_prices":      channelPrices,
+		"system_expression":   model.SystemBillingExpression(request.Model),
+		"upstream_expression": upstreamExpression,
+		"channel_expression":  request.Config.BillingExpression,
+		"upstream_group": func() string {
+			if request.Config.PricingSource != nil {
+				return request.Config.PricingSource.Group
+			}
+			return ""
+		}(),
+	}})
 }

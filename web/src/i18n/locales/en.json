@@ -1,5 +1,8 @@
 {
   "translation": {
+    "360": "360",
+    "1000": "1000",
+    "10000": "10000",
     "Channel models and billing": "Channel models and billing",
     "Configure model: {{model}}": "Configure model: {{model}}",
     "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.",
@@ -79,9 +82,6 @@
     "Provider description must not exceed 4096 characters": "Provider description must not exceed 4096 characters",
     "the default provider cannot be deleted": "The default provider cannot be deleted",
     "reassign or delete this provider's channels first": "Reassign or delete this provider's channels first",
-    "360": "360",
-    "1000": "1000",
-    "10000": "10000",
     "_copy": "_copy",
     "，": ", ",
     ", and": ", and",
@@ -6923,6 +6923,17 @@
     "Use input/output price": "Use input/output price",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Token prices must be between 0 and 1000000000 USD per million tokens.",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing."
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.",
+    "Price comparison: {{model}}": "Price comparison: {{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "System prices are the current local reference. Upstream prices include the imported group multiplier.",
+    "Upstream group": "Upstream group",
+    "Not schedulable": "Not schedulable",
+    "System price": "System price",
+    "Upstream price": "Upstream price",
+    "Channel price": "Channel price",
+    "No comparable token prices": "No comparable token prices",
+    "System expression": "System expression",
+    "Upstream expression": "Upstream expression",
+    "Channel expression": "Channel expression"
   }
 }

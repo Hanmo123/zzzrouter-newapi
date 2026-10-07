@@ -6807,6 +6807,17 @@
     "Use input/output price": "入力・出力単価を使用",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "単価は100万トークンあたり0〜1000000000 USDで指定してください。",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "グループ倍率、公開倍率、サービス料を適用する前の利用者向け基本単価（USD/100万トークン）です。上流のマッピング名ではなく公開モデル名で完全一致します。",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "入力と出力の単価は必須です。任意項目の空欄はシステム料金ではなく入力・出力単価を使用します。0を指定すると無料です。キャッシュ書き込み（5分/標準）と1時間は個別に設定できます。上書きを無効にするとシステム料金に戻ります。"
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "入力と出力の単価は必須です。任意項目の空欄はシステム料金ではなく入力・出力単価を使用します。0を指定すると無料です。キャッシュ書き込み（5分/標準）と1時間は個別に設定できます。上書きを無効にするとシステム料金に戻ります。",
+    "Price comparison: {{model}}": "価格比較: {{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "システム価格は現在のローカル基準価格です。上流価格にはインポートしたグループ倍率が含まれます。",
+    "Upstream group": "上流グループ",
+    "Not schedulable": "ルーティング対象外",
+    "System price": "システム価格",
+    "Upstream price": "上流価格",
+    "Channel price": "チャネル価格",
+    "No comparable token prices": "比較可能なトークン価格がありません",
+    "System expression": "システム式",
+    "Upstream expression": "上流式",
+    "Channel expression": "チャネル式"
   }
 }

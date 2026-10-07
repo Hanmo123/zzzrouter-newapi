@@ -1,5 +1,8 @@
 {
   "translation": {
+    "360": "360",
+    "1000": "1000",
+    "10000": "10000",
     "Channel models and billing": "渠道模型與計費",
     "Configure model: {{model}}": "設定模型：{{model}}",
     "Configure prices and observations independently for each public model. Group ratio applies last to customer charges; cost excludes service fees and group ratios.": "每個公開模型獨立設定價格和觀測資料。使用者扣費最後乘分組倍率；採購成本不含服務費與分組倍率。",
@@ -79,9 +82,6 @@
     "Provider description must not exceed 4096 characters": "服務商描述不能超過 4096 個字元",
     "the default provider cannot be deleted": "預設服務商不能刪除",
     "reassign or delete this provider's channels first": "請先轉移或刪除此服務商下的渠道",
-    "360": "360",
-    "1000": "1000",
-    "10000": "10000",
     "_copy": "_複製",
     "，": "，",
     ", and": "，和",
@@ -6923,6 +6923,17 @@
     "Use input/output price": "使用輸入/輸出單價",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Token 單價必須在 0 至 1000000000 美元/百萬 Token 之間。",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "使用者計費基礎價，單位為美元/百萬 Token，尚未乘群組倍率、公開倍率與服務費。按對外模型名稱精確匹配，不使用映射後的上游名稱。",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "輸入與輸出單價必填。可選類別留空時按輸入/輸出單價計費，不繼承系統價格；明確填寫 0 表示免費。快取寫入（5 分鐘/通用）與 1 小時可分別定價。關閉覆寫後恢復系統定價。"
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "輸入與輸出價格為必填。選用類別留白時使用輸入/輸出價格，不使用系統價格。明確的零值表示免費。快取寫入（5 分鐘/預設）與 1 小時快取可獨立定價。停用覆寫後恢復系統價格。",
+    "Price comparison: {{model}}": "價格比較：{{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "系統價格是目前的本地參考價。上游價格已包含匯入的分組倍率。",
+    "Upstream group": "上游分組",
+    "Not schedulable": "不可參與路由",
+    "System price": "系統價格",
+    "Upstream price": "上游價格",
+    "Channel price": "渠道價格",
+    "No comparable token prices": "沒有可比較的 Token 價格",
+    "System expression": "系統表達式",
+    "Upstream expression": "上游表達式",
+    "Channel expression": "渠道表達式"
   }
 }

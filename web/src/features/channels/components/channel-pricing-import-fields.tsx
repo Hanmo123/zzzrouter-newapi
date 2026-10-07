@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation } from '@tanstack/react-query'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -33,6 +33,10 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { previewChannelPricingImport } from '../api'
 import { CHANNEL_TYPE_NEW_API } from '../constants'
 import type { ChannelFormValues } from '../lib/channel-form'
+import {
+  ChannelModelNameButton,
+  ChannelPricingComparisonDialog,
+} from './channel-pricing-comparison-dialog'
 
 // This fills the existing channel draft; the channel Save owns persistence.
 export function ChannelPricingImportFields(props: {
@@ -42,6 +46,7 @@ export function ChannelPricingImportFields(props: {
   const { t } = useTranslation()
   const disabledReasonId = useId()
   const form = useFormContext<ChannelFormValues>()
+  const [comparisonModel, setComparisonModel] = useState<string | null>(null)
   const type = useWatch({ control: form.control, name: 'type' })
   const group = useWatch({
     control: form.control,
@@ -98,6 +103,9 @@ export function ChannelPricingImportFields(props: {
     disabledReason = t('Base URL is required for this channel type')
   }
   const result = mutation.data
+  const comparisonConfig = comparisonModel
+    ? form.getValues('model_configs')?.[comparisonModel]
+    : undefined
   const actionLabels = {
     added: t('Added'),
     updated: t('Updated'),
@@ -173,7 +181,16 @@ export function ChannelPricingImportFields(props: {
             getRowKey={(item) => item.model}
             emptyContent={t('No models')}
             columns={[
-              { id: 'model', header: t('Model'), cell: (item) => item.model },
+              {
+                id: 'model',
+                header: t('Model'),
+                cell: (item) => (
+                  <ChannelModelNameButton
+                    model={item.model}
+                    onClick={() => setComparisonModel(item.model)}
+                  />
+                ),
+              },
               {
                 id: 'action',
                 header: t('Status'),
@@ -196,6 +213,16 @@ export function ChannelPricingImportFields(props: {
               </AlertDescription>
             </Alert>
           )}
+          {comparisonConfig ? (
+            <ChannelPricingComparisonDialog
+              model={comparisonModel ?? ''}
+              config={comparisonConfig}
+              open
+              onOpenChange={(open) => {
+                if (!open) setComparisonModel(null)
+              }}
+            />
+          ) : null}
         </>
       )}
     </div>

@@ -116,7 +116,7 @@ describe('channel model configuration', () => {
       fetched_at: 100,
       applied_expression: expression,
     }
-    const post = vi.spyOn(api, 'post').mockResolvedValue({
+    const post = vi.spyOn(api, 'post').mockResolvedValueOnce({
       data: {
         success: true,
         data: {
@@ -132,6 +132,22 @@ describe('channel model configuration', () => {
         },
       },
     })
+    post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          public_ratio: { min: 0.5, max: 0.5 },
+          schedulable: true,
+          system_prices: { p: 10, c: 50, cc: 12.5, cc1h: 12.5 },
+          upstream_prices: { p: 5, c: 25, cc: 6.25, cc1h: 6.25 },
+          channel_prices: { p: 5, c: 25, cc: 6.25, cc1h: 6.25 },
+          system_expression: 'tier("base", p * 10 + c * 50)',
+          upstream_expression: expression,
+          channel_expression: expression,
+          upstream_group: 'vip',
+        },
+      },
+    })
     const save = renderForm(vi.fn(), { empty: true, importPrices: true })
     const user = userEvent.setup()
     await user.click(
@@ -140,6 +156,15 @@ describe('channel model configuration', () => {
     expect(
       await screen.findByRole('button', { name: 'Configure model: imported' })
     ).toBeVisible()
+    await user.click(
+      screen.getByRole('button', { name: 'imported' })
+    )
+    expect(
+      await screen.findByRole('heading', { name: 'Price comparison: imported' })
+    ).toBeVisible()
+    expect(screen.getByText('System price')).toBeVisible()
+    expect(screen.getByText('Upstream price')).toBeVisible()
+    expect(screen.getByText('0.5x')).toBeVisible()
     expect(
       screen.getByText(
         'Models missing from the upstream catalog were preserved: old-model'
@@ -155,6 +180,7 @@ describe('channel model configuration', () => {
       }),
       expect.anything()
     )
+    await user.click(screen.getByRole('button', { name: 'Close' }))
     await user.click(screen.getByRole('button', { name: 'Save models' }))
     await waitFor(() => expect(save).toHaveBeenCalled())
     const payload = transformFormDataToUpdatePayload(save.mock.calls[0][0], 1)

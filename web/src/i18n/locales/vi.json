@@ -6807,6 +6807,17 @@
     "Use input/output price": "Dùng giá đầu vào/đầu ra",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Đơn giá phải từ 0 đến 1000000000 USD trên một triệu token.",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Giá cơ sở tính cho người dùng theo USD trên một triệu token, trước hệ số nhóm, hệ số công khai và phí dịch vụ. Khớp chính xác tên mô hình công khai, không dùng tên ánh xạ phía nhà cung cấp.",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Bắt buộc có giá đầu vào và đầu ra. Các mục tùy chọn để trống dùng giá đầu vào/đầu ra, không dùng giá hệ thống. Giá 0 là miễn phí. Ghi bộ nhớ đệm (5 phút/mặc định) và 1 giờ có thể đặt giá riêng. Tắt ghi đè để khôi phục giá hệ thống."
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Bắt buộc có giá đầu vào và đầu ra. Các mục tùy chọn để trống dùng giá đầu vào/đầu ra, không dùng giá hệ thống. Giá 0 là miễn phí. Ghi bộ nhớ đệm (5 phút/mặc định) và 1 giờ có thể đặt giá riêng. Tắt ghi đè để khôi phục giá hệ thống.",
+    "Price comparison: {{model}}": "So sánh giá: {{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "Giá hệ thống là giá tham chiếu cục bộ hiện tại. Giá upstream đã bao gồm hệ số nhóm được nhập.",
+    "Upstream group": "Nhóm upstream",
+    "Not schedulable": "Không tham gia định tuyến",
+    "System price": "Giá hệ thống",
+    "Upstream price": "Giá upstream",
+    "Channel price": "Giá kênh",
+    "No comparable token prices": "Không có giá token để so sánh",
+    "System expression": "Biểu thức hệ thống",
+    "Upstream expression": "Biểu thức upstream",
+    "Channel expression": "Biểu thức kênh"
   }
 }

@@ -6807,6 +6807,17 @@
     "Use input/output price": "Использовать цену ввода/вывода",
     "Token prices must be between 0 and 1000000000 USD per million tokens.": "Цены должны быть от 0 до 1000000000 USD за миллион токенов.",
     "Customer billing base prices in USD per million tokens, before group ratio, public ratio and service fee. Exact public model names are used, not upstream mappings.": "Базовые цены для пользователя в USD за миллион токенов до коэффициентов группы, публичного коэффициента и комиссии. Используются точные публичные имена моделей, а не имена после преобразования.",
-    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Цены ввода и вывода обязательны. Пустые категории используют эти цены, а не системные. Явный ноль означает бесплатно. Запись кэша (5 мин/по умолчанию) и 1 ч оцениваются отдельно. Отключите переопределение для восстановления системных цен."
+    "Input and output prices are required. Blank optional categories use the input/output price, not system prices. Explicit zero is free. Cache writes (5m/default) and 1h can be priced independently. Disable the override to restore system pricing.": "Цены ввода и вывода обязательны. Пустые категории используют эти цены, а не системные. Явный ноль означает бесплатно. Запись кэша (5 мин/по умолчанию) и 1 ч оцениваются отдельно. Отключите переопределение для восстановления системных цен.",
+    "Price comparison: {{model}}": "Сравнение цен: {{model}}",
+    "System prices are the current local reference. Upstream prices include the imported group multiplier.": "Системные цены — это текущая локальная справочная цена. Цены upstream включают импортированный коэффициент группы.",
+    "Upstream group": "Группа upstream",
+    "Not schedulable": "Не участвует в маршрутизации",
+    "System price": "Системная цена",
+    "Upstream price": "Цена upstream",
+    "Channel price": "Цена канала",
+    "No comparable token prices": "Нет сопоставимых цен токенов",
+    "System expression": "Системное выражение",
+    "Upstream expression": "Выражение upstream",
+    "Channel expression": "Выражение канала"
   }
 }
