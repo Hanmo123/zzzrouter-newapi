@@ -213,6 +213,14 @@ func effectiveTokenPrice(prices map[string]float64, variable string, anthropic b
 	if price, exists := prices[variable]; exists {
 		return price
 	}
+	if variable == "cc1h" {
+		// Missing one-hour cache-write pricing inherits the ordinary cache-write
+		// price first, including an explicit zero; only a missing cc falls back
+		// to the input price below.
+		if price, exists := prices["cc"]; exists {
+			return price
+		}
+	}
 	if anthropic && (variable == "cc" || variable == "cc1h") {
 		return 0
 	}

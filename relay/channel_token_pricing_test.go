@@ -215,6 +215,33 @@ func TestChannelModelServiceTierQuotesAndBilling(t *testing.T) {
 	require.Error(t, service.FreezeRoutingServiceTier(ctx))
 }
 
+func TestChannelModelMissingCacheTTLReferenceFallsBackToCacheWrite(t *testing.T) {
+	channelModelPricingSettings(t)
+	modes := map[string]string{"quoted": "tiered_expr", "gpt-6-astra": "tiered_expr"}
+	expressions := map[string]string{
+		"quoted":      `tier("base",p*25+c*100+cr*5+cc*30+cc1h*50)`,
+		"gpt-6-astra": `tier("base",p*10+c*50+cr*1+cc*12.5)`,
+	}
+	modeJSON, err := common.Marshal(modes)
+	require.NoError(t, err)
+	exprJSON, err := common.Marshal(expressions)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode": string(modeJSON),
+		"billing_setting.billing_expr": string(exprJSON),
+	}))
+	channel := model.ChannelModelConfig{BillingExpression: `tier("base",p*5+c*25+cr*.5+cc*6.25+cc1h*6.25)`}
+	assert.Equal(t, &model.ModelRatioRange{Min: .5, Max: .5}, channel.ModelPublicRatio("gpt-6-astra"))
+
+	// An explicit zero cache-write price is preserved and does not inherit p.
+	expressions["gpt-6-astra"] = `tier("base",p*10+c*50+cr*1+cc*0)`
+	exprJSON, err = common.Marshal(expressions)
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_expr": string(exprJSON)}))
+	zeroCacheWrite := model.ChannelModelConfig{BillingExpression: `tier("base",p*5+c*25+cr*.5+cc*0+cc1h*0)`}
+	assert.Equal(t, &model.ModelRatioRange{Min: .5, Max: .5}, zeroCacheWrite.ModelPublicRatio("gpt-6-astra"))
+}
+
 func TestChannelModelDatabaseAndRouting(t *testing.T) {
 	channelModelPricingSettings(t)
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
