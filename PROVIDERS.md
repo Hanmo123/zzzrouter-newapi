@@ -168,7 +168,7 @@ DEGRADATION_CHECK_FORMAT=chat
 DEGRADATION_CHECK_ALLOW_HTTP=false
 ```
 
-master 注册任务并按渠道游标轮转，每渠道优先检测启用了检查的 test_model，否则取首个启用模型；这不等于检测全部模型。支持 OpenAI/Anthropic/OpenRouter/Advanced Custom/New API/vLLM/SGLang 的可复现文本协议。复杂签名、覆盖/转换或不支持的模态记 skipped。多 Key 只用首个启用 Key，不改轮询和启停。
+master 注册任务并按渠道游标轮转，每渠道优先检测启用了检查的 test_model，否则取首个启用模型；这不等于检测全部模型。支持 OpenAI/Anthropic/OpenRouter/Advanced Custom/New API/Sub2API/vLLM/SGLang 的可复现文本协议。复杂签名、覆盖/转换或不支持的模态记 skipped。多 Key 只用首个启用 Key，不改轮询和启停。
 
 模型元数据「为此模型启用降智检测」默认关闭；Provider/渠道 `skip_degradation_check` 优先排除，CLI 也尊重这些开关。HTTPS 默认，HTTP 需 opt-in，不跟重定向。探测可能产生上游费用，不走用户 relay 扣费；页面读取历史不会触发探测。
 

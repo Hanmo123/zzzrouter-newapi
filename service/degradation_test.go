@@ -1093,6 +1093,84 @@ func testDegradationFullScan(t *testing.T, db *gorm.DB) {
 		require.Len(t, history, 1)
 		assert.Equal(t, "text-model", history[0].Model)
 	})
+	for _, format := range []string{"chat", "responses"} {
+		t.Run("sub2api CLI and scheduler/"+format, func(t *testing.T) {
+			var calls atomic.Int32
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				path, input := "/v1/chat/completions", "messages"
+				response := `{"choices":[{"message":{"content":"can't"}}]}`
+				if format == "responses" {
+					path, input = "/v1/responses", "input"
+					response = `{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"can't"}]}]}`
+				}
+				assert.Equal(t, path, r.URL.Path)
+				assert.Equal(t, "Bearer sub2api-key-canary", r.Header.Get("Authorization"))
+				var body map[string]any
+				if !assert.NoError(t, common.DecodeJson(r.Body, &body)) {
+					return
+				}
+				assert.Equal(t, "up-a", body["model"])
+				assert.Equal(t, true, body["stream"])
+				assert.Equal(t, []any{map[string]any{"role": "user", "content": DegradationPrompt}}, body[input])
+				writeDegradationTestStream(w, response, format)
+			}))
+			defer endpoint.Close()
+			address := endpoint.URL
+			channel := model.Channel{Type: constant.ChannelTypeSub2API, ProviderID: providers[0].ID, Models: "m-a", ModelMapping: &mapping, Key: "sub2api-key-canary", BaseURL: &address}
+			require.NoError(t, channel.Insert())
+			args := []string{"--channel-id", strconv.Itoa(channel.Id), "--format", format, "--allow-http"}
+			var preview, out, stderr bytes.Buffer
+			require.Equal(t, 0, RunDegradationCLI(context.Background(), append(args, "--dry-run"), &preview, &stderr), stderr.String())
+			assert.Contains(t, preview.String(), `"state":"selected"`)
+			assert.Zero(t, calls.Load())
+			require.Equal(t, 0, RunDegradationCLI(context.Background(), args, &out, &stderr), stderr.String())
+			assert.EqualValues(t, 1, calls.Load())
+
+			previousMaster := common.IsMasterNode
+			common.IsMasterNode = true
+			t.Cleanup(func() { common.IsMasterNode = previousMaster })
+			t.Setenv("DEGRADATION_CHECK_ENABLED", "true")
+			t.Setenv("DEGRADATION_CHECK_ALLOW_HTTP", "true")
+			t.Setenv("DEGRADATION_CHECK_BATCH_SIZE", "1")
+			t.Setenv("DEGRADATION_CHECK_FORMAT", format)
+			handler := channelDegradationHandler{}
+			task, err := model.CreateSystemTask(handler.Type(), degradationTaskPayload{AfterID: channel.Id - 1}, nil)
+			require.NoError(t, err)
+			claimed, ok, err := model.ClaimSystemTask(task.ID, task.Type, "sub2api-runner", common.GetTimestamp()+60)
+			require.NoError(t, err)
+			require.True(t, ok)
+			handler.Run(context.Background(), claimed, "sub2api-runner")
+			finished, err := model.GetSystemTaskByTaskID(task.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, model.SystemTaskStatusSucceeded, finished.Status, finished.Error)
+			var result degradationTaskResult
+			require.NoError(t, common.UnmarshalJsonStr(finished.Result, &result))
+			assert.Equal(t, channel.Id, result.Cursor)
+			assert.Equal(t, 1, result.Normal)
+			assert.Equal(t, 1, result.SnapshotApplied)
+			assert.Zero(t, result.Skipped)
+			assert.EqualValues(t, 2, calls.Load())
+
+			var history []model.ChannelDegradationSample
+			require.NoError(t, db.Where("channel_id = ?", channel.Id).Find(&history).Error)
+			require.Len(t, history, 2)
+			for _, sample := range history {
+				assert.Equal(t, constant.ChannelTypeSub2API, sample.ChannelType)
+				assert.Equal(t, "m-a", sample.Model)
+				assert.Equal(t, "up-a", sample.UpstreamModel)
+				assert.Equal(t, format, sample.Protocol)
+				assert.Equal(t, "normal", sample.State)
+				assert.True(t, sample.SnapshotApplied)
+				assert.NotNil(t, sample.TTFTMs)
+			}
+			var observed model.Channel
+			require.NoError(t, db.First(&observed, channel.Id).Error)
+			assert.Equal(t, common.GetPointer(true), observed.ModelConfig("m-a").IsOnline)
+			assert.Equal(t, common.GetPointer(false), observed.ModelConfig("m-a").IsDegraded)
+			assert.NotNil(t, observed.ModelConfig("m-a").TTFTMs)
+		})
+	}
 	// Exercise the CLI-specific connection opener on each actual database, not
 	// only a test-supplied GORM handle. Opening must not migrate or create users.
 	switch db.Dialector.Name() {

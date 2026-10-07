@@ -166,7 +166,7 @@ func runChannelDegradationBatch(ctx context.Context, taskID, runnerID string, af
 	activeProviders := model.DB.Model(&model.Provider{}).Where("skip_degradation_check = ? OR skip_degradation_check IS NULL", false).Select("id")
 	eligible := model.DB.WithContext(ctx).Model(&model.Channel{}).
 		Where("status = ? AND type IN ? AND provider_id IN (?) AND (skip_degradation_check = ? OR skip_degradation_check IS NULL)", common.ChannelStatusEnabled,
-			[]int{constant.ChannelTypeOpenAI, constant.ChannelTypeAnthropic, constant.ChannelTypeOpenRouter, constant.ChannelTypeNewAPI, constant.ChannelTypeVLLM, constant.ChannelTypeSGLang, constant.ChannelTypeAdvancedCustom}, activeProviders, false)
+			[]int{constant.ChannelTypeOpenAI, constant.ChannelTypeAnthropic, constant.ChannelTypeOpenRouter, constant.ChannelTypeNewAPI, constant.ChannelTypeSub2API, constant.ChannelTypeVLLM, constant.ChannelTypeSGLang, constant.ChannelTypeAdvancedCustom}, activeProviders, false)
 	policy, err := model.LoadDegradationModelPolicy(ctx)
 	if err != nil {
 		return result, err
@@ -264,7 +264,7 @@ func channelDegradationTarget(channel *model.Channel, config DegradationTaskConf
 	}
 	target := DegradationTarget{Timeout: config.Timeout, AllowHTTP: config.AllowHTTP, Format: config.Format}
 	switch channel.Type {
-	case constant.ChannelTypeOpenAI, constant.ChannelTypeOpenRouter, constant.ChannelTypeNewAPI, constant.ChannelTypeVLLM, constant.ChannelTypeSGLang:
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeOpenRouter, constant.ChannelTypeNewAPI, constant.ChannelTypeSub2API, constant.ChannelTypeVLLM, constant.ChannelTypeSGLang:
 	case constant.ChannelTypeAnthropic:
 		target.Format = "anthropic"
 	case constant.ChannelTypeAdvancedCustom:
