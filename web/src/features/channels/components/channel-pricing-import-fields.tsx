@@ -59,6 +59,7 @@ export function ChannelPricingImportFields(props: {
     type: form.getValues('type'),
     base_url: form.getValues('base_url') ?? '',
     group: form.getValues('upstream_pricing_group')?.trim() ?? '',
+    manual_multiplier: form.getValues('upstream_pricing_multiplier'),
     models: form.getValues('models') ?? '',
     model_configs: form.getValues('model_configs') ?? {},
   })
@@ -149,6 +150,40 @@ export function ChannelPricingImportFields(props: {
           </FormItem>
         )}
       />
+      {isSub2API && (
+        <FormField
+          control={form.control}
+          name='upstream_pricing_multiplier'
+          render={({ field }) => (
+            <FormItem>
+              <Field>
+                <FieldLabel htmlFor='upstream-pricing-multiplier'>
+                  {t('Manual Sub2API group multiplier')}
+                </FieldLabel>
+                <Input
+                  id='upstream-pricing-multiplier'
+                  type='number'
+                  min={0}
+                  step='any'
+                  value={field.value ?? ''}
+                  disabled={
+                    props.sourceLocked || props.disabled || mutation.isPending
+                  }
+                  onChange={(event) => {
+                    const value = event.target.value
+                    field.onChange(value === '' ? undefined : Number(value))
+                  }}
+                />
+                <FieldDescription>
+                  {t(
+                    'When set, use the local system model price multiplied by this value. This fallback works when the public model plaza is unavailable.'
+                  )}
+                </FieldDescription>
+              </Field>
+            </FormItem>
+          )}
+        />
+      )}
       <Button
         type='button'
         variant='outline'

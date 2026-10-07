@@ -65,7 +65,7 @@ type sub2APIModelPlazaResponse struct {
 	} `json:"data"`
 }
 
-func FetchSub2APIPrices(ctx context.Context, baseURL, group string, currentModels []string, current model.ChannelModelConfigs) (*UpstreamPricingImport, error) {
+func FetchSub2APIPrices(ctx context.Context, baseURL, group string, currentModels []string, current model.ChannelModelConfigs, manualFactor *float64) (*UpstreamPricingImport, error) {
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New("invalid upstream pricing URL")
@@ -74,6 +74,12 @@ func FetchSub2APIPrices(ctx context.Context, baseURL, group string, currentModel
 		return nil, errors.New("an exact, non-auto upstream group is required")
 	}
 	baseURL = parsed.String()
+	if manualFactor != nil {
+		if !validImportPrice(*manualFactor) || *manualFactor > 1e9 {
+			return nil, errors.New("invalid manual Sub2API group multiplier")
+		}
+		return buildSub2APIManualPricingImport(baseURL, group, *manualFactor, currentModels, current, time.Now().Unix()), nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	raw, err := fetchPublicPricingJSON(ctx, baseURL+"/api/v1/model-plaza")
@@ -107,6 +113,18 @@ func FetchSub2APIPrices(ctx context.Context, baseURL, group string, currentModel
 	return buildExpressionPricingImport("sub2api", baseURL, group, factor, entries, currentModels, current, time.Now().Unix()), nil
 }
 
+func buildSub2APIManualPricingImport(baseURL, group string, factor float64, currentModels []string, current model.ChannelModelConfigs, now int64) *UpstreamPricingImport {
+	entries := make([]upstreamExpressionItem, 0, len(currentModels))
+	for _, name := range currentModels {
+		expression, ok := channelImportReference(name)
+		if !ok {
+			entries = append(entries, upstreamExpressionItem{name: name, err: errors.New("No comparable system price for manual Sub2API multiplier")})
+			continue
+		}
+		entries = append(entries, upstreamExpressionItem{name: name, expression: expression})
+	}
+	return buildExpressionPricingImport("sub2api", baseURL, group, factor, entries, currentModels, current, now)
+}
 func sub2APIGroup(groups []sub2APIModelPlaza, requested string) (sub2APIModelPlaza, bool) {
 	requestedID, idErr := strconv.Atoi(requested)
 	var selected sub2APIModelPlaza

@@ -26,7 +26,7 @@ func TestFetchSub2APIPrices(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 	httpClient, ssrfProtectedHTTPClient = client, client
-	result, err := FetchSub2APIPrices(context.Background(), "https://sub2api.example/", "12", nil, nil)
+	result, err := FetchSub2APIPrices(context.Background(), "https://sub2api.example/", "12", nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"tiered"}, result.Models)
 	require.Len(t, result.Items, 3)
@@ -45,6 +45,11 @@ func TestFetchSub2APIPrices(t *testing.T) {
 			assert.Equal(t, "added", item.Action)
 		}
 	}
-	_, err = FetchSub2APIPrices(context.Background(), "https://sub2api.example", "missing", nil, nil)
+	_, err = FetchSub2APIPrices(context.Background(), "https://sub2api.example", "missing", nil, nil, nil)
 	assert.ErrorContains(t, err, "group is unavailable")
+	manualFactor := 1.25
+	manual, err := FetchSub2APIPrices(context.Background(), "https://sub2api.example", "12", []string{"gpt-6-astra"}, nil, &manualFactor)
+	require.NoError(t, err)
+	require.NotNil(t, manual.Configs["gpt-6-astra"].PricingSource)
+	assert.Equal(t, "sub2api", manual.Configs["gpt-6-astra"].PricingSource.Provider)
 }

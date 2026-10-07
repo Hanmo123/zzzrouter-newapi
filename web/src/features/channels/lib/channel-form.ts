@@ -208,6 +208,12 @@ export const channelFormSchema = z
     name: z.string().min(1, ERROR_MESSAGES.REQUIRED_NAME),
     provider_id: z.number().int().positive().optional(),
     upstream_pricing_group: z.string().max(128).optional(),
+    upstream_pricing_multiplier: z
+      .number()
+      .finite()
+      .min(0)
+      .max(1000000000)
+      .optional(),
     model_configs: channelModelConfigsSchema.optional(),
     model_configs_revision: z.string().optional(),
     type: z.number().min(0, ERROR_MESSAGES.REQUIRED_TYPE),
@@ -436,6 +442,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   name: '',
   provider_id: undefined,
   upstream_pricing_group: '',
+  upstream_pricing_multiplier: undefined,
   model_configs: {},
   type: 1,
   base_url: '',
@@ -562,6 +569,7 @@ export function transformChannelToFormDefaults(
   let ollamaOpenAIChat = false
   let disableTaskPollingSleep = false
   let upstreamPricingGroup = ''
+  let upstreamPricingMultiplier: number | undefined
   let upstreamModelUpdateCheckEnabled = false
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
@@ -585,6 +593,9 @@ export function transformChannelToFormDefaults(
       ollamaOpenAIChat = parsed.ollama_openai_chat === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
       upstreamPricingGroup = parsed.upstream_pricing?.group ?? ''
+      if (typeof parsed.upstream_pricing?.multiplier === 'number') {
+        upstreamPricingMultiplier = parsed.upstream_pricing.multiplier
+      }
       upstreamModelUpdateCheckEnabled =
         parsed.upstream_model_update_check_enabled === true
       upstreamModelUpdateAutoSyncEnabled =
@@ -607,6 +618,7 @@ export function transformChannelToFormDefaults(
     name: channel.name || '',
     provider_id: channel.provider_id || undefined,
     upstream_pricing_group: upstreamPricingGroup,
+    upstream_pricing_multiplier: upstreamPricingMultiplier,
     model_configs: channel.model_configs ?? {},
     model_configs_revision: channel.model_configs_revision ?? undefined,
     type: channel.type,
@@ -849,6 +861,10 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.upstream_pricing = {
       provider: formData.type === CHANNEL_TYPE_SUB2API ? 'sub2api' : 'newapi',
       group: formData.upstream_pricing_group.trim(),
+      ...(formData.type === CHANNEL_TYPE_SUB2API &&
+      formData.upstream_pricing_multiplier !== undefined
+        ? { multiplier: formData.upstream_pricing_multiplier }
+        : {}),
     }
     settingsObj.upstream_model_update_auto_sync_enabled = false
   } else {

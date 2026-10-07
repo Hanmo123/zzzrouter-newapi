@@ -15,11 +15,12 @@ import (
 // forwarded, and model membership changes only when the channel draft is saved.
 func PreviewChannelPricingImport(c *gin.Context) {
 	var request struct {
-		Type    int                       `json:"type"`
-		BaseURL string                    `json:"base_url"`
-		Group   string                    `json:"group"`
-		Models  string                    `json:"models"`
-		Configs model.ChannelModelConfigs `json:"model_configs"`
+		Type             int                       `json:"type"`
+		BaseURL          string                    `json:"base_url"`
+		Group            string                    `json:"group"`
+		Models           string                    `json:"models"`
+		Configs          model.ChannelModelConfigs `json:"model_configs"`
+		ManualMultiplier *float64                  `json:"manual_multiplier,omitempty"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -47,7 +48,7 @@ func PreviewChannelPricingImport(c *gin.Context) {
 	var result *service.UpstreamPricingImport
 	var err error
 	if request.Type == constant.ChannelTypeSub2API {
-		result, err = service.FetchSub2APIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs)
+		result, err = service.FetchSub2APIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs, request.ManualMultiplier)
 	} else {
 		result, err = service.FetchNewAPIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs)
 	}

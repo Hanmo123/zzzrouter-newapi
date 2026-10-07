@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -1099,6 +1100,9 @@ func (channel *Channel) ValidateSettings() error {
 		validProvider := (channel.Type == constant.ChannelTypeNewAPI && source.Provider == "newapi") || (channel.Type == constant.ChannelTypeSub2API && source.Provider == "sub2api")
 		if !validProvider || strings.TrimSpace(source.Group) == "" || strings.TrimSpace(source.Group) != source.Group || len(source.Group) > 128 || source.Group == "auto" {
 			return fmt.Errorf("upstream pricing requires a supported channel and an exact, non-auto group")
+		}
+		if source.Multiplier != nil && (channel.Type != constant.ChannelTypeSub2API || math.IsNaN(*source.Multiplier) || math.IsInf(*source.Multiplier, 0) || *source.Multiplier < 0 || *source.Multiplier > 1e9) {
+			return fmt.Errorf("upstream pricing multiplier must be a finite, non-negative Sub2API multiplier")
 		}
 		if channelOtherSettings.UpstreamModelUpdateAutoSyncEnabled {
 			return fmt.Errorf("price synchronization cannot be combined with automatic model-only imports")

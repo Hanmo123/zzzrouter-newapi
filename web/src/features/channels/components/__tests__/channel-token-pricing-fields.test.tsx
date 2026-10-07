@@ -44,6 +44,7 @@ function PricingForm(props: {
   missingBaseURL?: boolean
   importPrices?: boolean
   channelType?: number
+  manualMultiplier?: number
 }) {
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
@@ -55,6 +56,7 @@ function PricingForm(props: {
           ? 'https://prices.example'
           : '',
       upstream_pricing_group: props.importPrices ? 'vip' : '',
+      upstream_pricing_multiplier: props.manualMultiplier,
       name: 'channel',
       key: 'key',
       models: props.empty ? '' : 'public.model-a,model-b',
@@ -92,6 +94,7 @@ function renderForm(
     importPrices?: boolean
     missingBaseURL?: boolean
     channelType?: number
+    manualMultiplier?: number
   } = {}
 ) {
   const client = new QueryClient({
@@ -224,6 +227,7 @@ describe('channel model configuration', () => {
       empty: true,
       importPrices: true,
       channelType: 59,
+      manualMultiplier: 1.25,
     })
     const user = userEvent.setup()
     await user.click(
@@ -234,7 +238,11 @@ describe('channel model configuration', () => {
     })
     expect(post).toHaveBeenCalledWith(
       '/api/channel/pricing/import/preview',
-      expect.objectContaining({ type: 59, group: 'vip' }),
+      expect.objectContaining({
+        type: 59,
+        group: 'vip',
+        manual_multiplier: 1.25,
+      }),
       expect.anything()
     )
   })

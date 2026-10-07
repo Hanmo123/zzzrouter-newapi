@@ -92,6 +92,7 @@ export async function previewChannelPricingImport(
     group: string
     models: string
     model_configs: ChannelModelConfigs
+    manual_multiplier?: number
   },
   signal?: AbortSignal
 ): Promise<ChannelPricingImport> {
