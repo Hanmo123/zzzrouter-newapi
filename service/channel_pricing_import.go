@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,19 +47,20 @@ type upstreamPricingCatalog struct {
 	GroupRatio map[string]float64     `json:"group_ratio"`
 }
 type upstreamPricingModel struct {
-	Name                 string   `json:"model_name"`
-	Groups               []string `json:"enable_groups"`
-	QuotaType            int      `json:"quota_type"`
-	ModelRatio           *float64 `json:"model_ratio"`
-	ModelPrice           *float64 `json:"model_price"`
-	CompletionRatio      *float64 `json:"completion_ratio"`
-	CacheRatio           *float64 `json:"cache_ratio"`
-	CreateCacheRatio     *float64 `json:"create_cache_ratio"`
-	ImageRatio           *float64 `json:"image_ratio"`
-	AudioRatio           *float64 `json:"audio_ratio"`
-	AudioCompletionRatio *float64 `json:"audio_completion_ratio"`
-	Mode                 string   `json:"billing_mode"`
-	Expression           string   `json:"billing_expr"`
+	Name                 string          `json:"model_name"`
+	Groups               []string        `json:"enable_groups"`
+	QuotaType            int             `json:"quota_type"`
+	ModelRatio           *float64        `json:"model_ratio"`
+	ModelPrice           *float64        `json:"model_price"`
+	CompletionRatio      *float64        `json:"completion_ratio"`
+	CacheRatio           *float64        `json:"cache_ratio"`
+	CreateCacheRatio     *float64        `json:"create_cache_ratio"`
+	ImageRatio           *float64        `json:"image_ratio"`
+	AudioRatio           *float64        `json:"audio_ratio"`
+	AudioCompletionRatio *float64        `json:"audio_completion_ratio"`
+	Mode                 string          `json:"billing_mode"`
+	Expression           string          `json:"billing_expr"`
+	ExpressionPricing    json.RawMessage `json:"expression_pricing"`
 }
 
 // FetchNewAPIPrices reads the public catalog without transmitting relay keys.
@@ -242,6 +244,9 @@ func newAPIModelExpression(item upstreamPricingModel, quotaUnit float64) (string
 			return "", errors.New("Upstream billing expression is too long")
 		}
 		if strings.TrimSpace(item.Expression) == "" {
+			if len(item.ExpressionPricing) != 0 && string(item.ExpressionPricing) != "null" {
+				return newAPIStructuredPriceExpression(item.ExpressionPricing)
+			}
 			return "", errors.New("Missing upstream billing expression")
 		}
 		return item.Expression, nil

@@ -166,6 +166,40 @@ func TestFetchNewAPIGroupCatalog(t *testing.T) {
 	_, err = FetchNewAPIPrices(context.Background(), "https://prices.example", "vip", nil, nil)
 	require.ErrorContains(t, err, "HTTP 403")
 	code = 200
+	// The channel-8 upstream omits billing_expr and publishes this structure.
+	body = `{"success":true,"group_ratio":{"vip":0.5},"data":[{"model_name":"structured-import","enable_groups":["vip"],"billing_mode":"tiered_expr","model_ratio":999,"expression_pricing":` + structuredImportFixture + `}]}`
+	result, err = FetchNewAPIPrices(context.Background(), "https://prices.example", "vip", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"structured-import"}, result.Models)
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "added", result.Items[0].Action)
+	assert.False(t, result.Items[0].Schedulable, "request-dependent quotation remains subject to the existing routing rules")
+	imported := result.Configs["structured-import"]
+	require.NotNil(t, imported.PricingSource)
+	assert.Equal(t, imported.BillingExpression, imported.PricingSource.Expression)
+	assert.Nil(t, imported.PublicRatio, "service rules cannot be replaced by the old model_ratio")
+	for _, length := range []float64{272000, 272001} {
+		for _, service := range []struct {
+			name   string
+			factor float64
+		}{{"", 1}, {"default", 1}, {"fast", 2.5}, {"flex", .5}, {"priority", 2.5}, {"unknown", 1}} {
+			request, err := common.Marshal(map[string]string{"service_tier": service.name})
+			require.NoError(t, err)
+			// These are normalized billable categories; Len independently selects the tier.
+			cost, _, err := billingexpr.RunExprWithRequest(imported.BillingExpression, billingexpr.TokenParams{P: 100, C: 10, CR: 20, CC: 3, CC1h: 2, Len: length}, billingexpr.RequestInput{Body: request})
+			require.NoError(t, err)
+			base := 100*5.0 + 10*30 + 20*.5 + 3*5 + 2*5
+			if length > 272000 {
+				base = 100*10.0 + 10*45 + 20*1 + 3*10 + 2*10
+			}
+			assert.InDelta(t, base*.5*service.factor, cost, 1e-9, "len=%v service=%s", length, service.name)
+		}
+	}
+	again, err := FetchNewAPIPrices(context.Background(), "https://prices.example", "vip", result.Models, result.Configs)
+	require.NoError(t, err)
+	assert.Equal(t, result.Configs, again.Configs)
+	assert.Equal(t, "unchanged", again.Items[0].Action)
+
 	body = `{"success":true,"group_ratio":{"vip":1},"data":[]}`
 	result, err = FetchNewAPIPrices(context.Background(), "https://prices.example", "vip", []string{"keep"}, nil)
 	require.NoError(t, err)
@@ -173,4 +207,56 @@ func TestFetchNewAPIGroupCatalog(t *testing.T) {
 	body = strings.Repeat("x", maxUpstreamPricingBytes+1)
 	_, err = FetchNewAPIPrices(context.Background(), "https://prices.example", "vip", nil, nil)
 	require.ErrorContains(t, err, "too large")
+}
+
+// Public expression_pricing returned for gpt-5.5 by channel 8's upstream.
+const structuredImportFixture = `{"tiers":[{"min_input":0,"max_input":272000,"input":5,"output":30,"cache_read":0.5,"cache_write":5,"cache_write_1h":5},{"min_input":272001,"input":10,"output":45,"cache_read":1,"cache_write":10,"cache_write_1h":10}],"service_multipliers":{"fast":2.5,"flex":0.5,"priority":2.5}}`
+
+func TestStructuredNewAPIPriceValidation(t *testing.T) {
+	for _, tc := range []struct{ name, source string }{
+		{"empty tiers", `{"tiers":[]}`},
+		{"null", `null`},
+		{"unknown rule", strings.Replace(structuredImportFixture, `"tiers":`, `"discount":0.5,"tiers":`, 1)},
+		{"unknown price", strings.Replace(structuredImportFixture, `"input":5`, `"image":5,"input":5`, 1)},
+		{"gap", strings.Replace(structuredImportFixture, `"min_input":272001`, `"min_input":272002`, 1)},
+		{"overlap", strings.Replace(structuredImportFixture, `"min_input":272001`, `"min_input":272000`, 1)},
+		{"fractional boundary", strings.Replace(structuredImportFixture, `"max_input":272000`, `"max_input":272000.5`, 1)},
+		{"missing first boundary", strings.Replace(structuredImportFixture, `"min_input":0,`, ``, 1)},
+		{"bounded last tier", strings.Replace(structuredImportFixture, `"min_input":272001`, `"min_input":272001,"max_input":500000`, 1)},
+		{"missing cache price", strings.Replace(structuredImportFixture, `"cache_read":0.5,`, ``, 1)},
+		{"negative price", strings.Replace(structuredImportFixture, `"input":5`, `"input":-5`, 1)},
+		{"null price", strings.Replace(structuredImportFixture, `"input":5`, `"input":null`, 1)},
+		{"unknown service", strings.Replace(structuredImportFixture, `"fast":`, `"new-rule":`, 1)},
+		{"null services", strings.Replace(structuredImportFixture, `{"fast":2.5,"flex":0.5,"priority":2.5}`, `null`, 1)},
+		{"negative service", strings.Replace(structuredImportFixture, `"fast":2.5`, `"fast":-2.5`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var item upstreamPricingModel
+			raw := `{"billing_mode":"tiered_expr","model_ratio":1,"expression_pricing":` + tc.source + `}`
+			require.NoError(t, common.Unmarshal([]byte(raw), &item))
+			_, err := newAPIModelExpression(item, 500000)
+			require.Error(t, err, "invalid expression metadata must never fall back to legacy ratios")
+			item.Expression = `tier("native", p*2+c*8)`
+			expr, err := newAPIModelExpression(item, 500000)
+			require.NoError(t, err)
+			assert.Equal(t, item.Expression, expr, "the complete native expression takes priority")
+		})
+	}
+	// Explicit zero prices remain distinct from missing fields; no service rules
+	// permits the existing complete-function proportionality check.
+	expr, err := newAPIStructuredPriceExpression([]byte(`{"tiers":[{"min_input":0,"max_input":null,"input":2,"output":8,"cache_read":0,"cache_write":0,"cache_write_1h":0}]}`))
+	require.NoError(t, err)
+	prices, ok := billingexpr.BaseTokenPrices(expr)
+	require.True(t, ok)
+	assert.Contains(t, prices, "cr")
+	assert.Zero(t, prices["cr"])
+	ratio, ok := billingexpr.ProportionalTokenPrice(expr, `tier("base", p*4+c*16+cr*0+cc*0+cc1h*0)`)
+	require.True(t, ok)
+	assert.Equal(t, .5, ratio)
+	// Zero is also a valid service price, not an omitted multiplier.
+	expr, err = newAPIStructuredPriceExpression([]byte(strings.Replace(structuredImportFixture, `"fast":2.5`, `"fast":0`, 1)))
+	require.NoError(t, err)
+	cost, _, err := billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{P: 100, C: 10, Len: 100}, billingexpr.RequestInput{Body: []byte(`{"service_tier":"fast"}`)})
+	require.NoError(t, err)
+	assert.Zero(t, cost)
 }
