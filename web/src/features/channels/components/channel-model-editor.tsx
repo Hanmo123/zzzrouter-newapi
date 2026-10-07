@@ -177,7 +177,7 @@ export function ChannelModelEditor(props: {
         <>
           <FieldDescription>
             {t(
-              'Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.'
+              'Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.'
             )}
           </FieldDescription>
           {preview.isError && source === expression && (

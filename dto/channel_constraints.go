@@ -39,18 +39,31 @@ const (
 	FilterRequestPath        ChannelFilterKind = "request_path"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
+	FilterServiceTier        ChannelFilterKind = "service_tier"
 	FilterMultiplier         ChannelFilterKind = "multiplier"
 	FilterAttemptedChannels  ChannelFilterKind = "attempted_channels"
 )
 
 type ChannelFilter struct {
 	Kind                   ChannelFilterKind
+	ServiceTier            string
 	Multiplier             MultiplierFilter
 	ExcludedChannelIDs     []int
 	RequestPath            string
 	TaskPluginKey          string
 	TaskPluginKeys         []string
 	TaskPluginChannelTypes []int
+}
+
+// RoutingServiceTier is frozen from the incoming request for all retry paths.
+// An empty value represents an omitted service_tier, matching public quotations.
+func RoutingServiceTier(filters []ChannelFilter) string {
+	for _, filter := range filters {
+		if filter.Kind == FilterServiceTier {
+			return filter.ServiceTier
+		}
+	}
+	return ""
 }
 
 type ChannelConstraints struct {

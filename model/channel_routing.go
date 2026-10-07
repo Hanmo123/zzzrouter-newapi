@@ -48,14 +48,14 @@ func GetFloorChannel(group, modelName string, filters []dto.ChannelFilter) (*Cha
 			}
 		}
 	}
-	return chooseFloorModelChannel(candidates, modelName), nil
+	return chooseFloorModelChannel(candidates, modelName, dto.RoutingServiceTier(filters)), nil
 }
 
-func chooseFloorModelChannel(candidates []*Channel, modelName string) *Channel {
+func chooseFloorModelChannel(candidates []*Channel, modelName, serviceTier string) *Channel {
 	floor, lower := math.Inf(1), math.Inf(1)
 	var tier []*Channel
 	for _, ch := range candidates {
-		quoted := ch.ModelConfig(modelName).ModelPublicRatio(modelName)
+		quoted := ch.ModelConfig(modelName).ModelServiceTierRatio(modelName, serviceTier)
 		if quoted == nil || quoted.Max > floor || (quoted.Max == floor && quoted.Min > lower) {
 			continue
 		}

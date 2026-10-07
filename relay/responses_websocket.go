@@ -273,6 +273,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	common.SetContextKey(c, appconstant.ContextKeyRequestStartTime, time.Now())
 	service.GetChannelConstraints(c).AddFilter(appdto.ChannelFilter{Kind: appdto.FilterRequestPath, RequestPath: c.Request.URL.Path})
 
+	if err := service.FreezeRoutingServiceTier(c); err != nil {
+		return newResponsesWSInvalidRequestError(err)
+	}
 	if s.lockedChannelID != 0 {
 		if apiErr = s.restoreConnectionContext(c, modelName); apiErr != nil {
 			return apiErr
@@ -600,7 +603,7 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 		return types.NewErrorWithStatusCode(errors.New("connection channel does not satisfy routing filters; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	modelConfig := channel.ModelConfig(model)
-	if modelConfig.ModelPublicRatio(model) == nil {
+	if modelConfig.ModelServiceTierRatio(model, appdto.RoutingServiceTier(service.GetChannelConstraints(c).Filters)) == nil {
 		return types.NewErrorWithStatusCode(errors.New("model pricing cannot be compared; reconnect required"), types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	c.Set("channel_model_config", modelConfig)

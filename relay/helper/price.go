@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	filterdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -102,7 +103,11 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	if value, ok := c.Get("channel_model_config"); ok {
 		config, _ = value.(model.ChannelModelConfig)
 	}
-	if config.ModelPublicRatio(info.GetOriginModelName()) == nil {
+	serviceTier := ""
+	if constraints, ok := common.GetContextKeyType[*filterdto.ChannelConstraints](c, constant.ContextKeyChannelConstraints); ok && constraints != nil {
+		serviceTier = filterdto.RoutingServiceTier(constraints.Filters)
+	}
+	if config.ModelServiceTierRatio(info.GetOriginModelName(), serviceTier) == nil {
 		return hosttypes.PriceData{}, fmt.Errorf("model %s has no comparable public ratio", info.GetOriginModelName())
 	}
 	info.PricingChannelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)

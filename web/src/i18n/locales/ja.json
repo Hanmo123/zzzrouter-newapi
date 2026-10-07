@@ -17,7 +17,7 @@
     "Upstream discount": "上流割引係数",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "仕入原価 = 基本料金 × 上流割引係数。0.8 は 80% の支払いを意味します。",
     "Use model billing expression": "モデルの課金式を使用",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "公開倍率は基本段階のトークン価格から算出します。課金式の料金に再適用しません。",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "公開倍率はデフォルトのサービス階層と基本コンテキスト段階のトークン単価で算出します。ルーティングは要求されたサービス階層で確認し、課金は倍率を再適用せず式全体を実行します。",
     "No comparable system token prices. This model is excluded from dispatch.": "システムのトークン価格と比較できないため、このモデルはルーティング対象外です。",
     "Public ratio is automatic with an expression.": "課金式を使用すると公開倍率は自動計算されます。",
     "Invalid billing expression": "課金式が無効です",

@@ -11,48 +11,66 @@ import (
 	"github.com/expr-lang/expr/parser"
 )
 
+type tokenPriceCacheKey struct {
+	source      string
+	serviceTier string
+}
+
 var tokenPriceCache = struct {
 	sync.Mutex
-	values map[string]map[string]float64
-}{values: make(map[string]map[string]float64)}
+	values map[tokenPriceCacheKey]map[string]float64
+}{values: make(map[tokenPriceCacheKey]map[string]float64)}
 
 // BaseTokenPrices reads linear token prices from the branch selected at zero
-// context length. All other conditions/units are incomparable. The original AST
-// preserves explicit zero coefficients that the execution optimizer may remove.
-// This is a quotation only: settlement always runs the complete expression.
+// context length and the default service tier. Other request conditions/units
+// remain incomparable. Settlement always runs the complete expression.
 func BaseTokenPrices(source string) (map[string]float64, bool) {
+	return TokenPricesForServiceTier(source, "")
+}
+
+// TokenPricesForServiceTier quotes the base context tier for the incoming
+// service_tier. Both the channel and system reference must use the same tier.
+func TokenPricesForServiceTier(source, serviceTier string) (map[string]float64, bool) {
+	key := tokenPriceCacheKey{source: source, serviceTier: serviceTier}
 	tokenPriceCache.Lock()
 	defer tokenPriceCache.Unlock()
-	if prices, found := tokenPriceCache.values[source]; found {
+	if prices, found := tokenPriceCache.values[key]; found {
 		return maps.Clone(prices), prices != nil
 	}
 	_, body := ParseExprVersion(source)
 	tree, err := parser.Parse(body)
 	var prices map[string]float64
 	if err == nil {
+		// Settlement normalizes variables from every branch, even when a branch
+		// is removed here for quotation.
+		variables := map[string]bool{}
+		ast.Find(tree.Node, func(node ast.Node) bool {
+			if name, ok := node.(*ast.IdentifierNode); ok {
+				switch name.Value {
+				case "p", "c", "cr", "cc", "cc1h", "img", "img_cr", "img_o", "ai", "ao":
+					variables[name.Value] = true
+				}
+			}
+			return false
+		})
+		ast.Walk(&tree.Node, &serviceTierQuotePatcher{serviceTier: serviceTier})
 		prices, err = linearTokenPrices(tree.Node)
 		if err != nil {
 			prices = nil
 		} else {
 			// Normalization sees variables used in any tier. A category priced
 			// only in a later tier has an explicit zero price in the base tier.
-			ast.Find(tree.Node, func(node ast.Node) bool {
-				if name, ok := node.(*ast.IdentifierNode); ok {
-					switch name.Value {
-					case "p", "c", "cr", "cc", "cc1h", "img", "img_cr", "img_o", "ai", "ao":
-						if _, exists := prices[name.Value]; !exists {
-							prices[name.Value] = 0
-						}
-					}
+			for name := range variables {
+				if _, exists := prices[name]; !exists {
+					prices[name] = 0
 				}
-				return false
-			})
+			}
 		}
 	}
 	if len(tokenPriceCache.values) >= maxCacheSize {
 		clear(tokenPriceCache.values)
 	}
-	tokenPriceCache.values[source] = prices
+	tokenPriceCache.values[key] = prices
 	return maps.Clone(prices), prices != nil
 }
 

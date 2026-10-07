@@ -17,7 +17,7 @@
     "Upstream discount": "上游折扣",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "採購成本 = 計費基礎 × 上游折扣；0.8 表示以八折採購。",
     "Use model billing expression": "使用模型計費表達式",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "公開倍率以基礎級距 Token 價格自動比較計算，不會再次乘入表達式扣費。",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "公開倍率按預設服務等級、基礎上下文級距的 Token 單價計算。路由按請求的服務等級檢查倍率；結算執行完整表達式，不再疊加該倍率。",
     "No comparable system token prices. This model is excluded from dispatch.": "無法與系統 Token 價格比較，此模型不參與調度。",
     "Public ratio is automatic with an expression.": "使用表達式時公開倍率自動計算。",
     "Invalid billing expression": "計費表達式無效",

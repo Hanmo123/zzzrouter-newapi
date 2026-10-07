@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -125,6 +126,83 @@ func TestChannelModelBillingAndRetry(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestChannelModelServiceTierQuotesAndBilling(t *testing.T) {
+	channelModelPricingSettings(t)
+	base := `tier("base",p*5+c*20+cr*1+cc*6+cc1h*10)`
+	expression := `(` + base + `) * ((param("service_tier") == "fast" || param("service_tier") == "priority") ? 2 : 1) * (param("service_tier") == "flex" ? .5 : 1)`
+	cfg := model.ChannelModelConfig{BillingExpression: expression, UpstreamDiscount: common.GetPointer(.8)}
+	assert.Equal(t, &model.ModelRatioRange{Min: .2, Max: .2}, cfg.ModelPublicRatio("quoted"))
+	for _, tc := range []struct {
+		tier   string
+		factor float64
+	}{{"", 1}, {"default", 1}, {"unknown", 1}, {"fast", 2}, {"priority", 2}, {"flex", .5}} {
+		t.Run(tc.tier, func(t *testing.T) {
+			quote := cfg.ModelServiceTierRatio("quoted", tc.tier)
+			require.NotNil(t, quote)
+			assert.InDelta(t, .2*tc.factor, quote.Min, 1e-12)
+			assert.InDelta(t, .2*tc.factor, quote.Max, 1e-12)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			body := `{"model":"quoted","service_tier":"` + tc.tier + `"}`
+			ctx.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			defer common.CleanupBodyStorage(ctx)
+			require.NoError(t, service.FreezeRoutingServiceTier(ctx))
+			assert.Equal(t, tc.tier, filterdto.RoutingServiceTier(service.GetChannelConstraints(ctx).Filters))
+			var reread map[string]any
+			require.NoError(t, common.UnmarshalBodyReusable(ctx, &reread))
+			assert.Equal(t, tc.tier, reread["service_tier"])
+			ctx.Set("channel_model_config", cfg)
+			ctx.Set("channel_public_ratio", cfg.ChargeRatio())
+			info := &relaycommon.RelayInfo{OriginModelName: "quoted", UserGroup: "default", UsingGroup: "default", BillingRequestInput: &billingexpr.RequestInput{Body: []byte(body)}, RelayCharge: &hosttypes.RelayCharge{ServiceFeeEnabled: true, ServiceFeeRate: .05}}
+			_, err := helper.ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			_, quota, result := service.TryTieredSettle(info, billingexpr.TokenParams{P: 1000, C: 100})
+			require.NotNil(t, result)
+			assert.Equal(t, common.QuotaRound(7350*tc.factor), quota)
+			cost, clamp := info.RelayCharge.CostQuota()
+			assert.Nil(t, clamp)
+			assert.Equal(t, common.QuotaRound(2800*tc.factor), cost)
+			ctx.Request.Body = nil // retries must not re-read a modified body
+			require.NoError(t, service.FreezeRoutingServiceTier(ctx))
+			assert.Equal(t, tc.tier, filterdto.RoutingServiceTier(service.GetChannelConstraints(ctx).Filters))
+		})
+	}
+	// Regression for channel 8: the real structured catalog's Astra expression
+	// now quotes against built-in pricing, including its independent 1h cache price.
+	astra := model.ChannelModelConfig{BillingExpression: `(len <= 272000 ? tier("standard",p*10+c*50+cr*1+cc*12.5+cc1h*12.5) : tier("long",p*20+c*75+cr*2+cc*25+cc1h*25)) * (param("service_tier") == "fast" ? 2 : 1) * (param("service_tier") == "flex" ? .5 : 1) * .5`}
+	assert.Equal(t, &model.ModelRatioRange{Min: .5, Max: .625}, astra.ModelPublicRatio("gpt-6-astra"))
+	assert.Equal(t, &model.ModelRatioRange{Min: 1, Max: 1.25}, astra.ModelServiceTierRatio("gpt-6-astra", "fast"))
+	assert.Equal(t, &model.ModelRatioRange{Min: .25, Max: .3125}, astra.ModelServiceTierRatio("gpt-6-astra", "flex"))
+	// Reference pricing has its own service rule; divide matching request prices.
+	reference := `tier("base",p*25+c*100+cr*5+cc*30+cc1h*50) * (param("service_tier") == "fast" ? 4 : 1)`
+	encoded, err := common.Marshal(map[string]string{"quoted": reference})
+	require.NoError(t, err)
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_expr": string(encoded)}))
+	assert.Equal(t, &model.ModelRatioRange{Min: .1, Max: .1}, cfg.ModelServiceTierRatio("quoted", "fast"))
+	assert.Equal(t, &model.ModelRatioRange{Min: .2, Max: .2}, cfg.ModelPublicRatio("quoted"))
+	for _, expr := range []string{`tier("x",p) * (param("speed") == "fast" ? 2 : 1)`, `tier("x",p) * (hour("UTC") < 10 ? 2 : 1)`, `tier("x",p) * ((param("service_tier") == "fast" || header("x") == "y") ? 2 : 1)`, `tier("x",p*p)`} {
+		_, ok := billingexpr.TokenPricesForServiceTier(expr, "fast")
+		assert.False(t, ok, expr)
+	}
+	// Cache entries are isolated by tier and preserve whole-expression variables.
+	branch := `param("service_tier") == "fast" ? tier("fast",p*2+cr*.5) : tier("base",p)`
+	prices, ok := billingexpr.BaseTokenPrices(branch)
+	require.True(t, ok)
+	assert.Zero(t, prices["cr"])
+	prices["p"] = 999
+	fast, ok := billingexpr.TokenPricesForServiceTier(branch, "fast")
+	require.True(t, ok)
+	assert.Equal(t, .5, fast["cr"])
+	prices, ok = billingexpr.BaseTokenPrices(branch)
+	require.True(t, ok)
+	assert.Equal(t, 1.0, prices["p"])
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"service_tier":42}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(ctx)
+	require.Error(t, service.FreezeRoutingServiceTier(ctx))
+}
+
 func TestChannelModelDatabaseAndRouting(t *testing.T) {
 	channelModelPricingSettings(t)
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
@@ -212,6 +290,47 @@ func TestChannelModelDatabaseAndRouting(t *testing.T) {
 				got, err = model.GetFloorChannel("default", "quoted", []filterdto.ChannelFilter{{Kind: filterdto.FilterAttemptedChannels, ExcludedChannelIDs: excluded}})
 				require.NoError(t, err)
 				assert.Nil(t, got)
+			}
+			// Service-tier prices affect cached and database selection identically.
+			dynamic := channels[1].ModelConfigs["quoted"]
+			dynamic.BillingExpression = `tier("x",p*3.25+c*15+cr*.75+cc*4.5+cc1h*7.5) * (param("service_tier") == "fast" ? 5 : 1) * (param("service_tier") == "flex" ? .5 : 1)`
+			channels[1].ModelConfigs["quoted"] = dynamic
+			common.MemoryCacheEnabled = false
+			require.NoError(t, channels[1].Update())
+			for _, cached := range []bool{false, true} {
+				common.MemoryCacheEnabled = cached
+				if cached {
+					model.InitChannelCache()
+				}
+				for _, tc := range []struct {
+					tier string
+					want int
+				}{{"", channels[0].Id}, {"fast", channels[0].Id}, {"flex", channels[1].Id}} {
+					ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+					body := `{"model":"quoted","service_tier":"` + tc.tier + `"}`
+					ctx.Request = httptest.NewRequest("POST", "/v1/responses", strings.NewReader(body))
+					ctx.Request.Header.Set("Content-Type", "application/json")
+					require.NoError(t, service.FreezeRoutingServiceTier(ctx))
+					filters := service.GetChannelConstraints(ctx).Filters
+					filters = append(filters, filterdto.ChannelFilter{Kind: filterdto.FilterMultiplier, Multiplier: filterdto.MultiplierFilter{Operator: "<=", Value: .2}})
+					service.GetChannelConstraints(ctx).Filters = filters
+					service.GetChannelConstraints(ctx).Routing = &filterdto.ModelRouting{Priority: "floor"}
+					got, _, selectErr := service.SelectChannelForRequest(ctx, "quoted", &service.RetryParam{Ctx: ctx, TokenGroup: "default", ModelName: "quoted", Retry: common.GetPointer(0)})
+					require.Nil(t, selectErr)
+					require.NotNil(t, got)
+					assert.Equal(t, tc.want, got.Id, "cached=%v tier=%s", cached, tc.tier)
+					ok, _ := model.ChannelSatisfiesFilters(&channels[1], "quoted", filters)
+					assert.Equal(t, tc.tier != "fast", ok)
+					service.GetChannelConstraints(ctx).AddPin(filterdto.ChannelPin{ChannelId: channels[1].Id, Source: filterdto.PinSourceToken})
+					_, _, selectErr = service.SelectChannelForRequest(ctx, "quoted", &service.RetryParam{Ctx: ctx, TokenGroup: "default", ModelName: "quoted"})
+					if tc.tier == "fast" {
+						require.NotNil(t, selectErr)
+						assert.Equal(t, filterdto.FilterMultiplier, selectErr.FilterKind)
+					} else {
+						require.Nil(t, selectErr)
+					}
+					common.CleanupBodyStorage(ctx)
+				}
 			}
 			common.MemoryCacheEnabled = false
 			// Observations update one model, with another model retaining unknown state.

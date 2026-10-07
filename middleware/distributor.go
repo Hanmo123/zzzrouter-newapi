@@ -643,7 +643,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
 	modelConfig := channel.ModelConfig(modelName)
-	if modelConfig.ModelPublicRatio(modelName) == nil {
+	if modelConfig.ModelServiceTierRatio(modelName, taskdto.RoutingServiceTier(service.GetChannelConstraints(c).Filters)) == nil {
 		return types.NewErrorWithStatusCode(errors.New("model pricing cannot be compared; channel model is excluded from dispatch"), types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	c.Set("channel_model_config", modelConfig)

@@ -173,7 +173,7 @@ func TestFetchNewAPIGroupCatalog(t *testing.T) {
 	require.Equal(t, []string{"structured-import"}, result.Models)
 	require.Len(t, result.Items, 1)
 	assert.Equal(t, "added", result.Items[0].Action)
-	assert.False(t, result.Items[0].Schedulable, "request-dependent quotation remains subject to the existing routing rules")
+	assert.False(t, result.Items[0].Schedulable, "a missing local system reference still prevents routing")
 	imported := result.Configs["structured-import"]
 	require.NotNil(t, imported.PricingSource)
 	assert.Equal(t, imported.BillingExpression, imported.PricingSource.Expression)

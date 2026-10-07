@@ -17,7 +17,7 @@
     "Upstream discount": "Coefficient d’achat amont",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Coût d’achat = montant de base × coefficient amont. 0,8 signifie payer 80 %.",
     "Use model billing expression": "Utiliser une expression de facturation",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Le coefficient public est calculé à partir des prix des tokens du palier de base. Il ne multiplie pas à nouveau le montant de l’expression.",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "Le coefficient public utilise les prix des tokens du palier de contexte de base et du niveau de service par défaut. Le routage vérifie le niveau demandé ; la facturation exécute l’expression complète sans réappliquer ce coefficient.",
     "No comparable system token prices. This model is excluded from dispatch.": "Comparaison impossible avec les prix système des tokens. Ce modèle est exclu du routage.",
     "Public ratio is automatic with an expression.": "Le coefficient public est automatique avec une expression.",
     "Invalid billing expression": "Expression de facturation invalide",

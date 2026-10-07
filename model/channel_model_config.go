@@ -154,6 +154,12 @@ type ModelRatioRange struct {
 // ModelPublicRatio is a current quotation, never a multiplier for expression
 // billing. A nil result excludes the channel-model from dispatch.
 func (config ChannelModelConfig) ModelPublicRatio(modelName string) *ModelRatioRange {
+	return config.ModelServiceTierRatio(modelName, "")
+}
+
+// ModelServiceTierRatio compares channel and system prices for the same request
+// service tier, at the base context length. It never changes settlement.
+func (config ChannelModelConfig) ModelServiceTierRatio(modelName, serviceTier string) *ModelRatioRange {
 	if config.BillingExpression == "" {
 		ratio := config.ChargeRatio()
 		if ratio < 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
@@ -161,11 +167,11 @@ func (config ChannelModelConfig) ModelPublicRatio(modelName string) *ModelRatioR
 		}
 		return &ModelRatioRange{Min: ratio, Max: ratio}
 	}
-	prices, ok := billingexpr.BaseTokenPrices(config.BillingExpression)
+	prices, ok := billingexpr.TokenPricesForServiceTier(config.BillingExpression, serviceTier)
 	if !ok {
 		return nil
 	}
-	baseline, ok := SystemTokenPrices(modelName)
+	baseline, ok := systemTokenPricesForServiceTier(modelName, serviceTier)
 	if !ok {
 		return nil
 	}
@@ -229,6 +235,10 @@ func tokenPriceParent(variable string) string {
 // overrides as relay pricing. It reads current settings, so changing system
 // prices immediately changes quotations without rewriting channel expressions.
 func SystemTokenPrices(name string) (map[string]float64, bool) {
+	return systemTokenPricesForServiceTier(name, "")
+}
+
+func systemTokenPricesForServiceTier(name, serviceTier string) (map[string]float64, bool) {
 	candidates := append([]string{name}, hostreasoning.CanonicalBillingModelNames(name)...)
 	candidates = append(candidates, hostreasoning.BaseModelName(name))
 	for _, candidate := range slices.Compact(candidates) {
@@ -237,7 +247,7 @@ func SystemTokenPrices(name string) (map[string]float64, bool) {
 			if !found {
 				return nil, false
 			}
-			return billingexpr.BaseTokenPrices(source)
+			return billingexpr.TokenPricesForServiceTier(source, serviceTier)
 		}
 		if _, fixed := ratio_setting.GetModelPrice(candidate, false); fixed {
 			return nil, false

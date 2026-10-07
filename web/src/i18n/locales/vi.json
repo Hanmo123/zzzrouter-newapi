@@ -17,7 +17,7 @@
     "Upstream discount": "Hệ số giá mua thượng nguồn",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Chi phí mua = phí cơ sở × hệ số giá mua. 0,8 nghĩa là trả 80%.",
     "Use model billing expression": "Dùng biểu thức tính phí mô hình",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Hệ số công khai được tính từ giá token ở bậc cơ sở và không nhân lại vào phí của biểu thức.",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "Hệ số công khai dùng giá token ở bậc ngữ cảnh cơ sở và cấp dịch vụ mặc định. Định tuyến kiểm tra cấp dịch vụ được yêu cầu; tính phí chạy toàn bộ biểu thức mà không nhân lại hệ số này.",
     "No comparable system token prices. This model is excluded from dispatch.": "Không thể so sánh với giá token hệ thống. Mô hình này bị loại khỏi định tuyến.",
     "Public ratio is automatic with an expression.": "Hệ số công khai được tính tự động khi dùng biểu thức.",
     "Invalid billing expression": "Biểu thức tính phí không hợp lệ",

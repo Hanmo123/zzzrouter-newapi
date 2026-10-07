@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -27,6 +28,31 @@ func GetChannelConstraints(c *gin.Context) *dto.ChannelConstraints {
 	constraints := &dto.ChannelConstraints{}
 	common.SetContextKey(c, constant.ContextKeyChannelConstraints, constraints)
 	return constraints
+}
+
+// FreezeRoutingServiceTier captures the same incoming JSON scalar used by the
+// billing expression snapshot. Retries reuse it even after channel overrides.
+func FreezeRoutingServiceTier(c *gin.Context) error {
+	constraints := GetChannelConstraints(c)
+	for _, filter := range constraints.Filters {
+		if filter.Kind == dto.FilterServiceTier {
+			return nil
+		}
+	}
+	var request struct {
+		ServiceTier *string `json:"service_tier"`
+	}
+	if c != nil && c.Request != nil && c.Request.Body != nil && strings.HasPrefix(strings.ToLower(c.Request.Header.Get("Content-Type")), "application/json") {
+		if err := common.UnmarshalBodyReusable(c, &request); err != nil {
+			return err
+		}
+	}
+	tier := ""
+	if request.ServiceTier != nil {
+		tier = *request.ServiceTier
+	}
+	constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterServiceTier, ServiceTier: tier})
+	return nil
 }
 
 func AppendTaskPluginIdentityFilter(c *gin.Context, pluginKey string) {
@@ -113,6 +139,9 @@ func (p *RetryParam) ResetRetryNextTry() {
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
+	if err := FreezeRoutingServiceTier(param.Ctx); err != nil {
+		return nil, "", err
+	}
 	var channel *model.Channel
 	var err error
 	selectGroup := param.TokenGroup
@@ -303,6 +332,9 @@ type ChannelSelectError struct {
 // filters. The group the channel was chosen from is returned for auto-group
 // callers. The caller still applies SetupContextForSelectedChannel.
 func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam) (*model.Channel, string, *ChannelSelectError) {
+	if err := FreezeRoutingServiceTier(c); err != nil {
+		return nil, "", &ChannelSelectError{StatusCode: http.StatusBadRequest, Code: types.ErrorCodeInvalidRequest, Message: "invalid request service_tier: " + err.Error()}
+	}
 	constraints := GetChannelConstraints(c)
 	if pin, found, overridden := constraints.ResolvedPin(); found {
 		for _, lost := range overridden {

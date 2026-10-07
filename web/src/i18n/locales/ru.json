@@ -17,7 +17,7 @@
     "Upstream discount": "Закупочный коэффициент",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Закупочная стоимость = базовая сумма × закупочный коэффициент. 0,8 означает оплату 80%.",
     "Use model billing expression": "Использовать выражение тарификации модели",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Публичный коэффициент рассчитывается по ценам токенов базового уровня и не применяется повторно к сумме выражения.",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "Публичный коэффициент использует цены токенов базового контекста и уровня обслуживания по умолчанию. Маршрутизация проверяет запрошенный уровень; расчёт выполняет полное выражение без повторного применения коэффициента.",
     "No comparable system token prices. This model is excluded from dispatch.": "Невозможно сравнить с системными ценами токенов. Модель исключена из маршрутизации.",
     "Public ratio is automatic with an expression.": "При использовании выражения публичный коэффициент рассчитывается автоматически.",
     "Invalid billing expression": "Недопустимое выражение тарификации",

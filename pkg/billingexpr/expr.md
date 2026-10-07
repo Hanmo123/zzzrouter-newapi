@@ -245,6 +245,19 @@ tier("base", p * 5 + c * 25)|||when(header("anthropic-beta") has "fast-mode") * 
 
 These factors are stored as ordinary multiplication in the final expression (for example, `(tier(...)) * (condition ? 6 : 1)`) and run in the same billing program.
 
+### Public Quotations and Service Tiers
+
+Public channel quotations use `len=0` and an omitted `service_tier`. Quotation
+extraction supports literal equality checks on `param("service_tier")`, including
+AND/OR combinations. Routing freezes the incoming service tier before channel
+selection and compares both channel and system prices for that tier. Floor
+ordering and multiplier constraints use this request-specific quotation through
+retries, pinned channels, affinity, and each Responses WebSocket call. Other
+request probes, time conditions, nonlinear expressions and fixed units remain
+incomparable. Whole-expression token normalization is retained when selecting a
+branch for quotation; quotation caches include the service tier. This does not
+change settlement or prove that the full billing function is a uniform ratio.
+
 ### Request Rule Tracing
 
 At compile time, the engine instruments ternary factors with this exact shape:

@@ -19,7 +19,7 @@ var filterEvalOrder = []dto.ChannelFilterKind{
 // On false, it returns the kind of the first violated filter (request_path
 // then task_plugin_identity) for error attribution.
 func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.ChannelFilter) (bool, dto.ChannelFilterKind) {
-	if ch == nil || ch.ModelConfig(modelName).ModelPublicRatio(modelName) == nil {
+	if ch == nil || ch.ModelConfig(modelName).ModelServiceTierRatio(modelName, dto.RoutingServiceTier(filters)) == nil {
 		return false, dto.FilterMultiplier
 	}
 	for _, kind := range filterEvalOrder {
@@ -27,7 +27,7 @@ func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.Channe
 			if filter.Kind != kind {
 				continue
 			}
-			if !channelMatchesFilter(ch, modelName, filter) {
+			if !channelMatchesFilter(ch, modelName, filter, dto.RoutingServiceTier(filters)) {
 				return false, kind
 			}
 		}
@@ -46,7 +46,7 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 	kept = make([]int, 0, len(ids))
 	for _, id := range ids {
 		ch := channelsIDM[id]
-		if ch == nil || ch.ModelConfig(modelName).ModelPublicRatio(modelName) != nil {
+		if ch == nil || ch.ModelConfig(modelName).ModelServiceTierRatio(modelName, dto.RoutingServiceTier(filters)) != nil {
 			kept = append(kept, id)
 		}
 	}
@@ -61,7 +61,7 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 		next := make([]int, 0, len(kept))
 		for _, id := range kept {
 			channel, exists := channelsIDM[id]
-			if candidatePassesKindFilters(channel, exists, modelName, kind, kindFilters) {
+			if candidatePassesKindFilters(channel, exists, modelName, kind, kindFilters, dto.RoutingServiceTier(filters)) {
 				next = append(next, id)
 			}
 		}
@@ -83,7 +83,7 @@ func filtersByKind(filters []dto.ChannelFilter, kind dto.ChannelFilterKind) []dt
 	return matched
 }
 
-func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind dto.ChannelFilterKind, filters []dto.ChannelFilter) bool {
+func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind dto.ChannelFilterKind, filters []dto.ChannelFilter, serviceTier string) bool {
 	if kind == dto.FilterRequestPath && !exists {
 		return true
 	}
@@ -91,17 +91,17 @@ func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind
 		return false
 	}
 	for _, filter := range filters {
-		if !channelMatchesFilter(ch, modelName, filter) {
+		if !channelMatchesFilter(ch, modelName, filter, serviceTier) {
 			return false
 		}
 	}
 	return true
 }
 
-func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
+func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter, serviceTier string) bool {
 	switch filter.Kind {
 	case dto.FilterMultiplier:
-		quoted := ch.ModelConfig(modelName).ModelPublicRatio(modelName)
+		quoted := ch.ModelConfig(modelName).ModelServiceTierRatio(modelName, serviceTier)
 		return quoted != nil && filter.Multiplier.Matches(quoted.Min) && filter.Multiplier.Matches(quoted.Max)
 	case dto.FilterAttemptedChannels:
 		return !slices.Contains(filter.ExcludedChannelIDs, ch.Id)

@@ -17,7 +17,7 @@
     "Upstream discount": "Upstream discount",
     "Cost = base charge × upstream discount. 0.8 means paying 80%.": "Cost = base charge × upstream discount. 0.8 means paying 80%.",
     "Use model billing expression": "Use model billing expression",
-    "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.": "Public ratio is calculated from base-tier token prices. It is not applied again to expression charges.",
+    "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.": "Public ratio uses base-context token prices at the default service tier. Routing checks the requested service tier; billing runs the full expression without applying this ratio again.",
     "No comparable system token prices. This model is excluded from dispatch.": "No comparable system token prices. This model is excluded from dispatch.",
     "Public ratio is automatic with an expression.": "Public ratio is automatic with an expression.",
     "Invalid billing expression": "Invalid billing expression",
