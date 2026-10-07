@@ -12,5 +12,8 @@ var builtinBillingExpr = map[string]string{
 	// Standard pricing; the long-context rates apply to the whole request.
 	// Do not infer service-tier discounts from incoming request parameters:
 	// channels filter service_tier by default, so it may not reach the upstream.
-	"gpt-6-astra": `len <= 272000 ? tier("standard", p * 10 + c * 50 + cr * 1 + cc * 12.5) : tier("long_context", p * 20 + c * 75 + cr * 2 + cc * 25)`,
+	// Cache-write TTL fallback is explicit: an unspecified 1h write price
+	// inherits the cache-write price, then the input price. These cc1h terms
+	// implement that local default; they are not a separately published TTL rate.
+	"gpt-6-astra": `len <= 272000 ? tier("standard", p * 10 + c * 50 + cr * 1 + cc * 12.5 + cc1h * 12.5) : tier("long_context", p * 20 + c * 75 + cr * 2 + cc * 25 + cc1h * 25)`,
 }

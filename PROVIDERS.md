@@ -35,7 +35,7 @@ New API 类型（60）支持填写「上游价格分组」，点击「导入分�
 
 原生 Token 表达式完整保留上下文阶梯、请求条件及显式零价。只有完整条件树及各档 Token 单价均可证明与本地系统计费成相同比例时才保存 `public_ratio`，否则保存含上游分组倍率的 `billing_expression`；不会用基础档报价代替完整比较，也不会修改上下文阈值。无法证明的表达式保留原式。按次表达式的金额只缩放 `fixed()` 字面量。有效但没有可比较系统价的表达式会导入并提示不参与调度；任务用量表达式 `u()` 仍受现有渠道 Token 计费边界限制。旧式音频价格缺少完整端点语义时报告需要上游表达式，不猜测价格。
 
-支持上游以 `expression_pricing` 替代 `billing_expr` 的结构化目录：`tiers` 中的 `min_input`/`max_input` 是连续、含端点的整数上下文区间，最后一档无上限；输入、输出、缓存读取、缓存写入与一小时缓存写入均须提供明确单价（USD/百万 Token，零价有效）。`service_multipliers` 的 `fast`/`flex`/`priority` 转换为 `param("service_tier")` 条件倍率。存在完整 `billing_expr` 时优先采用原式；未知价格字段、缺失单价、区间空洞或重叠均逐模型报错，不回退到旧倍率。服务等级条件可按默认档生成公开报价，实际请求按其 `service_tier` 比较渠道与系统参考价后执行路由约束。
+支持上游以 `expression_pricing` 替代 `billing_expr` 的结构化目录：`tiers` 中的 `min_input`/`max_input` 是连续、含端点的整数上下文区间，最后一档无上限；输入、输出、缓存读取须提供明确单价（USD/百万 Token，零价有效）。同一档位中缺失的缓存写入价继承输入价，缺失的一小时缓存写入价先继承缓存写入价，再继承输入价；生成的表达式明确写出 `cc` 和 `cc1h` 系数，报价与结算共用。显式零价不回退，null、负价或其他非法值报错。`service_multipliers` 的 `fast`/`flex`/`priority` 转换为 `param("service_tier")` 条件倍率。存在完整 `billing_expr` 时优先采用原式；未知价格字段、缺失必填单价、区间空洞或重叠均逐模型报错，不回退到旧倍率。服务等级条件可按默认档生成公开报价，实际请求按其 `service_tier` 比较渠道与系统参考价后执行路由约束。
 
 响应包含合并后的 `models`、`model_configs`、逐模型 `items`（added/updated/unchanged/conflict/unsupported）及 `removed`。新增和更新保留模型采购折扣与观测；手动修改的价格不覆盖，上游消失的模型只提示、不删除。非法、缺失或重复价格不以默认倍率补齐。渠道保存使用现有事务更新模型配置及 abilities，携带 `model_configs_revision` 检查旧草稿。同步来源启用时停用仅自动添加模型的功能，避免无价格的新模型先进入路由。
 

@@ -223,6 +223,11 @@ func TestStructuredNewAPIPriceValidation(t *testing.T) {
 		{"fractional boundary", strings.Replace(structuredImportFixture, `"max_input":272000`, `"max_input":272000.5`, 1)},
 		{"missing first boundary", strings.Replace(structuredImportFixture, `"min_input":0,`, ``, 1)},
 		{"bounded last tier", strings.Replace(structuredImportFixture, `"min_input":272001`, `"min_input":272001,"max_input":500000`, 1)},
+		{"null cache write", strings.Replace(structuredImportFixture, `"cache_write":5`, `"cache_write":null`, 1)},
+		{"null 1h cache write", strings.Replace(structuredImportFixture, `"cache_write_1h":5`, `"cache_write_1h":null`, 1)},
+		{"negative cache write", strings.Replace(structuredImportFixture, `"cache_write":5`, `"cache_write":-1`, 1)},
+		{"negative 1h cache write", strings.Replace(structuredImportFixture, `"cache_write_1h":5`, `"cache_write_1h":-1`, 1)},
+		{"missing input", strings.Replace(structuredImportFixture, `"input":5,`, ``, 1)},
 		{"missing cache price", strings.Replace(structuredImportFixture, `"cache_read":0.5,`, ``, 1)},
 		{"negative price", strings.Replace(structuredImportFixture, `"input":5`, `"input":-5`, 1)},
 		{"null price", strings.Replace(structuredImportFixture, `"input":5`, `"input":null`, 1)},
@@ -241,6 +246,41 @@ func TestStructuredNewAPIPriceValidation(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, item.Expression, expr, "the complete native expression takes priority")
 		})
+	}
+	for _, tc := range []struct {
+		name, fields   string
+		write, write1h float64
+	}{
+		{"1h inherits write", `,"cache_write":3`, 3, 3},
+		{"both inherit input", ``, 2, 2},
+		{"explicit 1h keeps price", `,"cache_write_1h":7`, 2, 7},
+		{"zero write inherited", `,"cache_write":0`, 0, 0},
+		{"zero 1h preserved", `,"cache_write":3,"cache_write_1h":0`, 3, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expr, err := newAPIStructuredPriceExpression([]byte(`{"tiers":[{"min_input":0,"input":2,"output":8,"cache_read":0.2` + tc.fields + `}]}`))
+			require.NoError(t, err)
+			prices, ok := billingexpr.BaseTokenPrices(expr)
+			require.True(t, ok)
+			assert.Equal(t, tc.write, prices["cc"])
+			assert.Equal(t, tc.write1h, prices["cc1h"])
+			require.True(t, billingexpr.UsedVars(expr)["cc"])
+			require.True(t, billingexpr.UsedVars(expr)["cc1h"])
+			cost, _, err := billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{CC: 100, CC1h: 50}, billingexpr.RequestInput{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.write*100+tc.write1h*50, cost)
+		})
+	}
+	// Resolve each tier independently; never inherit a price from a previous tier.
+	inherited := strings.ReplaceAll(strings.ReplaceAll(structuredImportFixture, `,"cache_write_1h":5`, ``), `,"cache_write_1h":10`, ``)
+	inherited = strings.Replace(inherited, `,"cache_write":10`, ``, 1)
+	inherited = strings.Replace(inherited, `"input":10`, `"input":20`, 1)
+	tierExpr, err := newAPIStructuredPriceExpression([]byte(inherited))
+	require.NoError(t, err)
+	for _, tc := range []struct{ length, price float64 }{{272000, 5}, {272001, 20}} {
+		cost, _, err := billingexpr.RunExprWithRequest(tierExpr, billingexpr.TokenParams{CC: 100, CC1h: 50, Len: tc.length}, billingexpr.RequestInput{})
+		require.NoError(t, err)
+		assert.Equal(t, 150*tc.price, cost)
 	}
 	// Explicit zero prices remain distinct from missing fields; no service rules
 	// permits the existing complete-function proportionality check.

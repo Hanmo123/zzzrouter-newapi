@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -167,12 +168,23 @@ func TestChannelModelServiceTierQuotesAndBilling(t *testing.T) {
 			assert.Equal(t, tc.tier, filterdto.RoutingServiceTier(service.GetChannelConstraints(ctx).Filters))
 		})
 	}
-	// Regression for channel 8: the real structured catalog's Astra expression
-	// now quotes against built-in pricing, including its independent 1h cache price.
+	// Regression for channel 8: the built-in reference explicitly inherits the
+	// 1h cache-write price from cc in both context tiers.
 	astra := model.ChannelModelConfig{BillingExpression: `(len <= 272000 ? tier("standard",p*10+c*50+cr*1+cc*12.5+cc1h*12.5) : tier("long",p*20+c*75+cr*2+cc*25+cc1h*25)) * (param("service_tier") == "fast" ? 2 : 1) * (param("service_tier") == "flex" ? .5 : 1) * .5`}
-	assert.Equal(t, &model.ModelRatioRange{Min: .5, Max: .625}, astra.ModelPublicRatio("gpt-6-astra"))
-	assert.Equal(t, &model.ModelRatioRange{Min: 1, Max: 1.25}, astra.ModelServiceTierRatio("gpt-6-astra", "fast"))
-	assert.Equal(t, &model.ModelRatioRange{Min: .25, Max: .3125}, astra.ModelServiceTierRatio("gpt-6-astra", "flex"))
+	assert.Equal(t, &model.ModelRatioRange{Min: .5, Max: .5}, astra.ModelPublicRatio("gpt-6-astra"))
+	assert.Equal(t, &model.ModelRatioRange{Min: 1, Max: 1}, astra.ModelServiceTierRatio("gpt-6-astra", "fast"))
+	assert.Equal(t, &model.ModelRatioRange{Min: .25, Max: .25}, astra.ModelServiceTierRatio("gpt-6-astra", "flex"))
+	builtin, found := billing_setting.GetBillingExpr("gpt-6-astra")
+	require.True(t, found)
+	for _, tc := range []struct{ length, price float64 }{{272000, 12.5}, {272001, 25}} {
+		usage := billingexpr.TokenParams{CC1h: 100, Len: tc.length}
+		baseCost, _, err := billingexpr.RunExprWithRequest(builtin, usage, billingexpr.RequestInput{})
+		require.NoError(t, err)
+		assert.Equal(t, 100*tc.price, baseCost)
+		channelCost, _, err := billingexpr.RunExprWithRequest(astra.BillingExpression, usage, billingexpr.RequestInput{})
+		require.NoError(t, err)
+		assert.Equal(t, baseCost*.5, channelCost)
+	}
 	// Reference pricing has its own service rule; divide matching request prices.
 	reference := `tier("base",p*25+c*100+cr*5+cc*30+cc1h*50) * (param("service_tier") == "fast" ? 4 : 1)`
 	encoded, err := common.Marshal(map[string]string{"quoted": reference})

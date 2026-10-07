@@ -57,6 +57,15 @@ func newAPIStructuredPriceExpression(raw json.RawMessage) (string, error) {
 			nextMin = *maxInput + 1
 			fmt.Fprintf(&expression, "len <= %s ? ", strconv.FormatFloat(*maxInput, 'f', 0, 64))
 		}
+		// Resolve missing cache-write prices before emitting the expression, so
+		// quotation and settlement share the explicit cc1h -> cc -> p contract.
+		// Only absence inherits: explicit zero stays free; null/invalid is rejected.
+		if _, exists := tier["cache_write"]; !exists {
+			tier["cache_write"] = tier["input"]
+		}
+		if _, exists := tier["cache_write_1h"]; !exists {
+			tier["cache_write_1h"] = tier["cache_write"]
+		}
 		prices := map[string]float64{}
 		for field, variable := range map[string]string{"input": "p", "output": "c", "cache_read": "cr", "cache_write": "cc", "cache_write_1h": "cc1h"} {
 			price := tier[field]
