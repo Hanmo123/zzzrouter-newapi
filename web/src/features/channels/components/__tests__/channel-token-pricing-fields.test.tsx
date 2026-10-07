@@ -41,6 +41,7 @@ function PricingForm(props: {
   save: (data: ChannelFormValues) => void
   empty?: boolean
   disabled?: boolean
+  missingBaseURL?: boolean
   importPrices?: boolean
 }) {
   const form = useForm<ChannelFormValues>({
@@ -48,7 +49,10 @@ function PricingForm(props: {
     defaultValues: {
       ...CHANNEL_FORM_DEFAULT_VALUES,
       type: props.importPrices ? 60 : 1,
-      base_url: props.importPrices ? 'https://prices.example' : '',
+      base_url:
+        props.importPrices && !props.missingBaseURL
+          ? 'https://prices.example'
+          : '',
       upstream_pricing_group: props.importPrices ? 'vip' : '',
       name: 'channel',
       key: 'key',
@@ -81,7 +85,12 @@ function PricingForm(props: {
 }
 function renderForm(
   save = vi.fn(),
-  options: { empty?: boolean; disabled?: boolean; importPrices?: boolean } = {}
+  options: {
+    empty?: boolean
+    disabled?: boolean
+    importPrices?: boolean
+    missingBaseURL?: boolean
+  } = {}
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -172,7 +181,12 @@ describe('channel model configuration', () => {
     expect(
       screen.getByRole('button', { name: 'Import group models and prices' })
     ).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    ).toHaveAccessibleDescription('Group is required')
+    expect(group).toHaveAttribute('placeholder', 'default')
     await user.type(group, 'vip')
+    expect(screen.queryByText('Group is required')).not.toBeInTheDocument()
     await user.click(
       screen.getByRole('button', { name: 'Import group models and prices' })
     )
@@ -240,6 +254,16 @@ describe('channel model configuration', () => {
       0.42
     )
   })
+  it('explains when the connection Base URL is missing', () => {
+    renderForm(vi.fn(), { importPrices: true, missingBaseURL: true })
+    const button = screen.getByRole('button', {
+      name: 'Import group models and prices',
+    })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAccessibleDescription(
+      'Base URL is required for this channel type'
+    )
+  })
   it('disables the import action for read-only users', () => {
     renderForm(vi.fn(), { importPrices: true, disabled: true })
     expect(
@@ -248,6 +272,9 @@ describe('channel model configuration', () => {
     expect(
       screen.getByRole('button', { name: 'Import group models and prices' })
     ).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    ).toHaveAccessibleDescription('No permission to perform this action')
   })
   it('edits one model discount, ratio and observations without changing another model', async () => {
     const save = renderForm()

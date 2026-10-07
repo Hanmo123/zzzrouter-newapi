@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -40,6 +40,7 @@ export function ChannelPricingImportFields(props: {
   disabled?: boolean
 }) {
   const { t } = useTranslation()
+  const disabledReasonId = useId()
   const form = useFormContext<ChannelFormValues>()
   const type = useWatch({ control: form.control, name: 'type' })
   const group = useWatch({
@@ -86,6 +87,16 @@ export function ChannelPricingImportFields(props: {
     onError: (error) => handleServerError(error),
   })
   if (type !== CHANNEL_TYPE_NEW_API) return null
+  let disabledReason = ''
+  if (props.disabled) {
+    disabledReason = t('No permission to perform this action')
+  } else if (mutation.isPending) {
+    disabledReason = t('Loading...')
+  } else if (!group?.trim()) {
+    disabledReason = t('Group is required')
+  } else if (!baseURL?.trim()) {
+    disabledReason = t('Base URL is required for this channel type')
+  }
   const result = mutation.data
   const actionLabels = {
     added: t('Added'),
@@ -128,17 +139,18 @@ export function ChannelPricingImportFields(props: {
         variant='outline'
         aria-label={t('Import group models and prices')}
         aria-busy={mutation.isPending}
-        disabled={
-          props.disabled ||
-          mutation.isPending ||
-          !group?.trim() ||
-          !baseURL?.trim()
-        }
+        aria-describedby={disabledReason ? disabledReasonId : undefined}
+        disabled={Boolean(disabledReason)}
         onClick={() => mutation.mutate(snapshot())}
       >
         {mutation.isPending && <Spinner data-icon='inline-start' />}
         {t('Import group models and prices')}
       </Button>
+      {disabledReason && (
+        <FieldDescription id={disabledReasonId} aria-live='polite'>
+          {disabledReason}
+        </FieldDescription>
+      )}
       {group?.trim() && (
         <FieldDescription>
           {t(
