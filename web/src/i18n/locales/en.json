@@ -6934,6 +6934,7 @@
     "No comparable token prices": "No comparable token prices",
     "System expression": "System expression",
     "Upstream expression": "Upstream expression",
-    "Channel expression": "Channel expression"
+    "Channel expression": "Channel expression",
+    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included."
   }
 }

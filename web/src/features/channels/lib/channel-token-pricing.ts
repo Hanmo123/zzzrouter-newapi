@@ -24,7 +24,7 @@ export const channelModelConfigSchema = z
   .object({
     pricing_source: z
       .object({
-        provider: z.literal('newapi'),
+        provider: z.union([z.literal('newapi'), z.literal('sub2api')]),
         base_url: z.string().max(2048),
         group: z.string().max(128),
         expression: z.string().max(16384),

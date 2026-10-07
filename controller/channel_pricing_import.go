@@ -26,7 +26,7 @@ func PreviewChannelPricingImport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid pricing import request"})
 		return
 	}
-	if request.Type != constant.ChannelTypeNewAPI {
+	if request.Type != constant.ChannelTypeNewAPI && request.Type != constant.ChannelTypeSub2API {
 		common.ApiErrorMsg(c, "This channel type does not support pricing imports")
 		return
 	}
@@ -44,7 +44,13 @@ func PreviewChannelPricingImport(c *gin.Context) {
 			models = append(models, name)
 		}
 	}
-	result, err := service.FetchNewAPIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs)
+	var result *service.UpstreamPricingImport
+	var err error
+	if request.Type == constant.ChannelTypeSub2API {
+		result, err = service.FetchSub2APIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs)
+	} else {
+		result, err = service.FetchNewAPIPrices(c.Request.Context(), request.BaseURL, request.Group, models, request.Configs)
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return

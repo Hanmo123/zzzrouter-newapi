@@ -118,7 +118,7 @@ export interface ChannelOtherSettings {
   claude_beta_query?: boolean
   ollama_openai_chat?: boolean
   disable_task_polling_sleep?: boolean
-  upstream_pricing?: { provider: 'newapi'; group: string }
+  upstream_pricing?: { provider: 'newapi' | 'sub2api'; group: string }
   upstream_model_update_check_enabled?: boolean
   upstream_model_update_auto_sync_enabled?: boolean
   upstream_model_update_ignored_models?: string[]

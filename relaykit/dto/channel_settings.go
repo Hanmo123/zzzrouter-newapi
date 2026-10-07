@@ -100,7 +100,7 @@ const (
 )
 
 // UpstreamPricingSource selects a catalog adapter independently of relay protocol.
-// Scheduling is deliberately separate; the first adapter supports New API.
+// Scheduling is deliberately separate; New API and Sub2API support public catalogs.
 type UpstreamPricingSource struct {
 	Provider string `json:"provider"`
 	Group    string `json:"group"`

@@ -6818,6 +6818,7 @@
     "No comparable token prices": "Không có giá token để so sánh",
     "System expression": "Biểu thức hệ thống",
     "Upstream expression": "Biểu thức upstream",
-    "Channel expression": "Biểu thức kênh"
+    "Channel expression": "Biểu thức kênh",
+    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "Dùng tên hoặc ID nhóm Sub2API cố định. Giá lấy từ khu vực mô hình công khai và không bao gồm chiết khấu riêng của tài khoản."
   }
 }

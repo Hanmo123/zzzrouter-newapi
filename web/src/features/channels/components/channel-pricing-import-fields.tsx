@@ -31,7 +31,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { previewChannelPricingImport } from '../api'
-import { CHANNEL_TYPE_NEW_API } from '../constants'
+import { CHANNEL_TYPE_NEW_API, CHANNEL_TYPE_SUB2API } from '../constants'
 import type { ChannelFormValues } from '../lib/channel-form'
 import {
   ChannelModelNameButton,
@@ -91,7 +91,10 @@ export function ChannelPricingImportFields(props: {
     },
     onError: (error) => handleServerError(error),
   })
-  if (type !== CHANNEL_TYPE_NEW_API) return null
+  if (type !== CHANNEL_TYPE_NEW_API && type !== CHANNEL_TYPE_SUB2API) {
+    return null
+  }
+  const isSub2API = type === CHANNEL_TYPE_SUB2API
   let disabledReason = ''
   if (props.disabled) {
     disabledReason = t('No permission to perform this action')
@@ -134,9 +137,13 @@ export function ChannelPricingImportFields(props: {
                 placeholder='default'
               />
               <FieldDescription>
-                {t(
-                  'Use a fixed upstream token group matching this name. Prices come from the public New API catalog; account-specific discounts are not included.'
-                )}
+                {isSub2API
+                  ? t(
+                      'Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.'
+                    )
+                  : t(
+                      'Use a fixed upstream token group matching this name. Prices come from the public New API catalog; account-specific discounts are not included.'
+                    )}
               </FieldDescription>
             </Field>
           </FormItem>

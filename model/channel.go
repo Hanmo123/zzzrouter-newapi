@@ -1096,8 +1096,9 @@ func (channel *Channel) ValidateSettings() error {
 		}
 	}
 	if source := channelOtherSettings.UpstreamPricing; source != nil {
-		if channel.Type != constant.ChannelTypeNewAPI || source.Provider != "newapi" || strings.TrimSpace(source.Group) == "" || strings.TrimSpace(source.Group) != source.Group || len(source.Group) > 128 || source.Group == "auto" {
-			return fmt.Errorf("upstream pricing requires a New API channel and an exact, non-auto group")
+		validProvider := (channel.Type == constant.ChannelTypeNewAPI && source.Provider == "newapi") || (channel.Type == constant.ChannelTypeSub2API && source.Provider == "sub2api")
+		if !validProvider || strings.TrimSpace(source.Group) == "" || strings.TrimSpace(source.Group) != source.Group || len(source.Group) > 128 || source.Group == "auto" {
+			return fmt.Errorf("upstream pricing requires a supported channel and an exact, non-auto group")
 		}
 		if channelOtherSettings.UpstreamModelUpdateAutoSyncEnabled {
 			return fmt.Errorf("price synchronization cannot be combined with automatic model-only imports")

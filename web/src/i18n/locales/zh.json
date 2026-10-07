@@ -6934,6 +6934,7 @@
     "No comparable token prices": "没有可比较的 Token 价格",
     "System expression": "系统表达式",
     "Upstream expression": "上游表达式",
-    "Channel expression": "渠道表达式"
+    "Channel expression": "渠道表达式",
+    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "请填写固定的 Sub2API 分组名称或 ID。价格来自公开模型广场，不包含账户专属折扣。"
   }
 }

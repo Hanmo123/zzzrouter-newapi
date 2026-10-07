@@ -146,52 +146,65 @@ func fetchPublicPricingJSON(ctx context.Context, endpoint string) ([]byte, error
 	return body, nil
 }
 
+type upstreamExpressionItem struct {
+	name       string
+	expression string
+	err        error
+}
+
 func buildUpstreamPricingImport(baseURL, group string, factor, quotaUnit float64, items []upstreamPricingModel, currentModels []string, current model.ChannelModelConfigs, now int64) *UpstreamPricingImport {
+	entries := make([]upstreamExpressionItem, 0, len(items))
+	for _, item := range items {
+		if !slices.Contains(item.Groups, group) && !slices.Contains(item.Groups, "all") {
+			continue
+		}
+		expression, err := newAPIModelExpression(item, quotaUnit)
+		entries = append(entries, upstreamExpressionItem{name: item.Name, expression: expression, err: err})
+	}
+	return buildExpressionPricingImport("newapi", baseURL, group, factor, entries, currentModels, current, now)
+}
+
+func buildExpressionPricingImport(provider, baseURL, group string, factor float64, entries []upstreamExpressionItem, currentModels []string, current model.ChannelModelConfigs, now int64) *UpstreamPricingImport {
 	result := &UpstreamPricingImport{Models: slices.Clone(currentModels), Configs: maps.Clone(current), Items: []UpstreamPricingImportItem{}, Removed: []string{}}
 	if result.Configs == nil {
 		result.Configs = model.ChannelModelConfigs{}
 	}
 	available := map[string]bool{}
 	counts := map[string]int{}
-	for _, item := range items {
-		if slices.Contains(item.Groups, group) || slices.Contains(item.Groups, "all") {
-			counts[item.Name]++
-		}
+	for _, entry := range entries {
+		counts[entry.name]++
 	}
-	for _, item := range items {
-		if !slices.Contains(item.Groups, group) && !slices.Contains(item.Groups, "all") {
+	for _, entry := range entries {
+		if available[entry.name] {
 			continue
 		}
-		if available[item.Name] {
-			continue
-		}
-		available[item.Name] = true
-		row := UpstreamPricingImportItem{Model: item.Name, Action: "unsupported"}
-		expression, err := newAPIModelExpression(item, quotaUnit)
+		available[entry.name] = true
+		row := UpstreamPricingImportItem{Model: entry.name, Action: "unsupported"}
+		expression, err := entry.expression, entry.err
 		if err == nil {
 			expression, err = billingexpr.ScalePriceExpression(expression, factor)
 		}
 		candidate := model.ChannelModelConfig{BillingExpression: expression}
-		if counts[item.Name] > 1 {
+		if counts[entry.name] > 1 {
 			err = errors.New("Duplicate upstream model prices")
 		}
 		if err == nil {
-			err = (&model.Channel{ModelConfigs: model.ChannelModelConfigs{item.Name: candidate}}).ValidateModelConfigs()
+			err = (&model.Channel{ModelConfigs: model.ChannelModelConfigs{entry.name: candidate}}).ValidateModelConfigs()
 		}
 		if err != nil {
 			row.Reason = err.Error()
 			result.Items = append(result.Items, row)
 			continue
 		}
-		if reference, ok := channelImportReference(item.Name); ok && candidate.ModelPublicRatio(item.Name) != nil {
+		if reference, ok := channelImportReference(entry.name); ok && candidate.ModelPublicRatio(entry.name) != nil {
 			if ratio, proportional := billingexpr.ProportionalTokenPrice(expression, reference); proportional {
 				candidate.BillingExpression = ""
 				candidate.PublicRatio = &ratio
 			}
 		}
-		old, exists := current[item.Name]
+		old, exists := current[entry.name]
 		source := old.PricingSource
-		owned := source != nil && source.Provider == "newapi" && source.BaseURL == baseURL && source.Group == group && old.BillingExpression == source.AppliedExpression && equalImportedRatio(old.PublicRatio, source.AppliedRatio)
+		owned := source != nil && source.Provider == provider && source.BaseURL == baseURL && source.Group == group && old.BillingExpression == source.AppliedExpression && equalImportedRatio(old.PublicRatio, source.AppliedRatio)
 		if exists && !owned && (source != nil || old.BillingExpression != "" || old.PublicRatio != nil) {
 			row.Action = "conflict"
 			row.Reason = "Locally edited pricing was preserved"
@@ -203,26 +216,26 @@ func buildUpstreamPricingImport(baseURL, group string, factor, quotaUnit float64
 			row.Action = "updated"
 		}
 		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(expression)))
-		candidate.PricingSource = &model.ChannelModelPricingSource{Provider: "newapi", BaseURL: baseURL, Group: group, Expression: expression, SourceHash: hash, FetchedAt: now, AppliedExpression: candidate.BillingExpression, AppliedRatio: candidate.PublicRatio}
+		candidate.PricingSource = &model.ChannelModelPricingSource{Provider: provider, BaseURL: baseURL, Group: group, Expression: expression, SourceHash: hash, FetchedAt: now, AppliedExpression: candidate.BillingExpression, AppliedRatio: candidate.PublicRatio}
 		if owned && source.SourceHash == hash && old.BillingExpression == candidate.BillingExpression && equalImportedRatio(old.PublicRatio, candidate.PublicRatio) {
 			candidate.PricingSource = source
 			row.Action = "unchanged"
 		}
 		candidate.UpstreamDiscount = old.UpstreamDiscount
 		candidate.IsOnline, candidate.IsDegraded, candidate.TTFTMs, candidate.LastCheckedAt = old.IsOnline, old.IsDegraded, old.TTFTMs, old.LastCheckedAt
-		row.Schedulable = candidate.ModelPublicRatio(item.Name) != nil
+		row.Schedulable = candidate.ModelPublicRatio(entry.name) != nil
 		if !row.Schedulable {
 			row.Reason = "Imported expression has no comparable system price; routing is disabled"
 		}
-		result.Configs[item.Name] = candidate
-		if !slices.Contains(result.Models, item.Name) {
-			result.Models = append(result.Models, item.Name)
+		result.Configs[entry.name] = candidate
+		if !slices.Contains(result.Models, entry.name) {
+			result.Models = append(result.Models, entry.name)
 		}
 		result.Items = append(result.Items, row)
 	}
 	for name, config := range current {
 		source := config.PricingSource
-		if source != nil && source.Provider == "newapi" && source.BaseURL == baseURL && source.Group == group && !available[name] {
+		if source != nil && source.Provider == provider && source.BaseURL == baseURL && source.Group == group && !available[name] {
 			result.Removed = append(result.Removed, name)
 		}
 	}

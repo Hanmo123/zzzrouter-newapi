@@ -91,7 +91,7 @@ func (config ChannelModelConfig) ChargeRatio() float64 {
 }
 func (config ChannelModelConfig) Validate() error {
 	if source := config.PricingSource; source != nil {
-		if source.Provider != "newapi" || len(source.BaseURL) > 2048 || len(source.Group) > 128 || len(source.Expression) > 16384 || len(source.AppliedExpression) > 16384 || source.FetchedAt < 0 {
+		if (source.Provider != "newapi" && source.Provider != "sub2api") || len(source.BaseURL) > 2048 || len(source.Group) > 128 || len(source.Expression) > 16384 || len(source.AppliedExpression) > 16384 || source.FetchedAt < 0 {
 			return errors.New("invalid model pricing source")
 		}
 		if source.AppliedRatio != nil && (*source.AppliedRatio < 0 || math.IsNaN(*source.AppliedRatio) || math.IsInf(*source.AppliedRatio, 0)) {

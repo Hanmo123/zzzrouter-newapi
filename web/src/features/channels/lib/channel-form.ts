@@ -21,6 +21,7 @@ import { z } from 'zod'
 import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_SUB2API,
   CHANNEL_TYPE_OLLAMA,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
@@ -841,11 +842,12 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   }
 
   if (
-    formData.type === CHANNEL_TYPE_NEW_API &&
+    (formData.type === CHANNEL_TYPE_NEW_API ||
+      formData.type === CHANNEL_TYPE_SUB2API) &&
     formData.upstream_pricing_group?.trim()
   ) {
     settingsObj.upstream_pricing = {
-      provider: 'newapi',
+      provider: formData.type === CHANNEL_TYPE_SUB2API ? 'sub2api' : 'newapi',
       group: formData.upstream_pricing_group.trim(),
     }
     settingsObj.upstream_model_update_auto_sync_enabled = false

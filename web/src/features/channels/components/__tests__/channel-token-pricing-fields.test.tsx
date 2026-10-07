@@ -43,12 +43,13 @@ function PricingForm(props: {
   disabled?: boolean
   missingBaseURL?: boolean
   importPrices?: boolean
+  channelType?: number
 }) {
   const form = useForm<ChannelFormValues>({
     resolver: zodResolver(channelFormSchema),
     defaultValues: {
       ...CHANNEL_FORM_DEFAULT_VALUES,
-      type: props.importPrices ? 60 : 1,
+      type: props.channelType ?? (props.importPrices ? 60 : 1),
       base_url:
         props.importPrices && !props.missingBaseURL
           ? 'https://prices.example'
@@ -90,6 +91,7 @@ function renderForm(
     disabled?: boolean
     importPrices?: boolean
     missingBaseURL?: boolean
+    channelType?: number
   } = {}
 ) {
   const client = new QueryClient({
@@ -156,9 +158,7 @@ describe('channel model configuration', () => {
     expect(
       await screen.findByRole('button', { name: 'Configure model: imported' })
     ).toBeVisible()
-    await user.click(
-      screen.getByRole('button', { name: 'imported' })
-    )
+    await user.click(screen.getByRole('button', { name: 'imported' }))
     expect(
       await screen.findByRole('heading', { name: 'Price comparison: imported' })
     ).toBeVisible()
@@ -194,6 +194,51 @@ describe('channel model configuration', () => {
       group: 'vip',
     })
   })
+  it('imports Sub2API group prices through the same draft flow', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          models: ['sub2api-model'],
+          model_configs: {
+            'sub2api-model': {
+              billing_expression: 'tier("base", p * 3 + c * 15)',
+              pricing_source: {
+                provider: 'sub2api',
+                base_url: 'https://prices.example',
+                group: '12',
+                expression: 'tier("base", p * 3 + c * 15)',
+                source_hash: 'sub2api-hash',
+                fetched_at: 100,
+              },
+            },
+          },
+          items: [
+            { model: 'sub2api-model', action: 'added', schedulable: false },
+          ],
+          removed: [],
+        },
+      },
+    })
+    renderForm(vi.fn(), {
+      empty: true,
+      importPrices: true,
+      channelType: 59,
+    })
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('button', { name: 'Import group models and prices' })
+    )
+    await screen.findByRole('button', {
+      name: 'Configure model: sub2api-model',
+    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/channel/pricing/import/preview',
+      expect.objectContaining({ type: 59, group: 'vip' }),
+      expect.anything()
+    )
+  })
+
   it('disables imports without a group or write permission and preserves the draft on failure', async () => {
     vi.spyOn(api, 'post').mockResolvedValue({
       data: { success: false, message: 'Catalog unavailable' },

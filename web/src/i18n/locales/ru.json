@@ -6818,6 +6818,7 @@
     "No comparable token prices": "Нет сопоставимых цен токенов",
     "System expression": "Системное выражение",
     "Upstream expression": "Выражение upstream",
-    "Channel expression": "Выражение канала"
+    "Channel expression": "Выражение канала",
+    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "Укажите фиксированное имя или ID группы Sub2API. Цены берутся из публичной витрины моделей и не включают скидки для конкретного аккаунта."
   }
 }

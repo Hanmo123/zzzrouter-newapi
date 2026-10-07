@@ -6818,6 +6818,7 @@
     "No comparable token prices": "比較可能なトークン価格がありません",
     "System expression": "システム式",
     "Upstream expression": "上流式",
-    "Channel expression": "チャネル式"
+    "Channel expression": "チャネル式",
+    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "固定のSub2APIグループ名またはIDを指定してください。価格は公開モデル広場から取得し、アカウント固有の割引は含みません。"
   }
 }
