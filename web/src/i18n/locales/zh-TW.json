@@ -6935,6 +6935,6 @@
     "System expression": "系統表達式",
     "Upstream expression": "上游表達式",
     "Channel expression": "渠道表達式",
-    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "請填寫固定的 Sub2API 分組名稱或 ID。價格來自公開模型廣場，不包含帳戶專屬折扣。"
+    "Use a fixed Sub2API group ID (recommended); group names are also accepted. Prices come from the public model plaza; account-specific discounts are not included.": "請填寫固定的 Sub2API 分組 ID（推薦）；也支援分組名稱。價格來自公開模型廣場，不包含帳戶專屬折扣。"
   }
 }

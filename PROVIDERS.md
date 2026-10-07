@@ -45,7 +45,7 @@ New API 类型（60）支持填写「上游价格分组」，点击「导入分�
 
 ## Sub2API 分组价格导入
 
-Sub2API 类型（59）复用同一价格导入入口。填写上游地址和 Sub2API 分组名称或数字 ID 后，点击「导入分组模型与价格」；后端读取公开的 `/api/v1/model-plaza`，选择精确分组，将分组 `rate_multiplier` 乘入模型价卡，并把结果写入当前渠道草稿。分组配置保存为 `settings.upstream_pricing = {provider:"sub2api", group:"..."}`。该流程不读取或发送渠道 API Key，保存渠道后才生效。
+Sub2API 类型（59）复用同一价格导入入口。建议填写稳定的上游分组 ID；当前也兼容分组名称。填写上游地址和 Sub2API 分组 ID 后，点击「导入分组模型与价格」；后端读取公开的 `/api/v1/model-plaza`，选择精确分组，将分组 `rate_multiplier` 乘入模型价卡，并把结果写入当前渠道草稿。分组配置保存为 `settings.upstream_pricing = {provider:"sub2api", group:"..."}`。该流程不读取或发送渠道 API Key，保存渠道后才生效。
 
 Sub2API 广场单价是 USD/Token，导入时转换为本项目的 USD/百万 Token。支持输入、输出、缓存读写、图片 Token 价格、上下文阶梯和 `reasoning_effort_multipliers`；分时计费、按次价格以及缺少完整 Token 单价的模型会逐模型标记为不支持，避免导入后产生错误账单。`null` 不会当作免费，显式零价仍保留。匿名公开广场不包含专属分组或账户专属倍率，因此导入的上游价格不等于账户最终账单。
 

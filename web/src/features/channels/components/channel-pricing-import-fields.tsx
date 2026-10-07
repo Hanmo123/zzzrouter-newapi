@@ -134,12 +134,12 @@ export function ChannelPricingImportFields(props: {
                 disabled={
                   props.sourceLocked || props.disabled || mutation.isPending
                 }
-                placeholder='default'
+                placeholder={isSub2API ? '12' : 'default'}
               />
               <FieldDescription>
                 {isSub2API
                   ? t(
-                      'Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.'
+                      'Use a fixed Sub2API group ID (recommended); group names are also accepted. Prices come from the public model plaza; account-specific discounts are not included.'
                     )
                   : t(
                       'Use a fixed upstream token group matching this name. Prices come from the public New API catalog; account-specific discounts are not included.'

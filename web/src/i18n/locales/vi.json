@@ -6819,6 +6819,6 @@
     "System expression": "Biểu thức hệ thống",
     "Upstream expression": "Biểu thức upstream",
     "Channel expression": "Biểu thức kênh",
-    "Use a fixed Sub2API group name or ID. Prices come from the public model plaza; account-specific discounts are not included.": "Dùng tên hoặc ID nhóm Sub2API cố định. Giá lấy từ khu vực mô hình công khai và không bao gồm chiết khấu riêng của tài khoản."
+    "Use a fixed Sub2API group ID (recommended); group names are also accepted. Prices come from the public model plaza; account-specific discounts are not included.": "Dùng ID nhóm Sub2API cố định (khuyến nghị); cũng chấp nhận tên nhóm. Giá lấy từ khu vực mô hình công khai và không bao gồm chiết khấu riêng của tài khoản."
   }
 }
