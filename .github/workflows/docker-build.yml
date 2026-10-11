@@ -14,6 +14,8 @@ on:
 
 jobs:
   build_single_arch:
+    # Upstream Docker Hub publishing is separate from this fork's GHCR workflow.
+    if: github.repository == 'QuantumNous/new-api'
     name: Build & push (${{ matrix.arch }})
     strategy:
       fail-fast: false

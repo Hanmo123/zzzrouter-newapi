@@ -10,6 +10,7 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'QuantumNous/new-api'
     strategy:
       matrix:
         # os: [macos-latest, windows-latest]

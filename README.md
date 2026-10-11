@@ -55,6 +55,12 @@
 
 ---
 
+## ZzzRouter container images
+
+This fork publishes `ghcr.io/hanmo123/zzzrouter-newapi` (API and built-in admin UI) with GitHub Actions. Pushes to `main` publish `latest`, `main`, and a full `sha-...` tag; `v*` tags publish the exact version tag without moving `latest`. Both `linux/amd64` and `linux/arm64` are built. Pull requests build amd64 without publishing. The workflow uses `GITHUB_TOKEN` with `packages: write`; no Docker Hub secrets are needed. Upstream Docker Hub, binary release, and Electron publishing jobs run only in `QuantumNous/new-api`.
+
+See the [ZzzRouter Docker instructions](README.zh_CN.md#zzzrouter-docker-镜像) for build/run commands and GHCR package visibility. The separate Nuxt application is in [Hanmo123/zzzrouter-frontend](https://github.com/Hanmo123/zzzrouter-frontend). The upstream deployment examples below still refer to the upstream image.
+
 ## 📝 Project Description
 
 New API is a self-hosted AI gateway for applications, agents, and teams. Connect upstream model services, expose a consistent API to your clients, and manage routing, access, usage, and costs in one place.

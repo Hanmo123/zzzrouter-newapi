@@ -10,6 +10,7 @@ on:
 
 jobs:
   prepare:
+    if: github.repository == 'QuantumNous/new-api'
     name: Prepare Docker tags
     runs-on: ubuntu-latest
     outputs:

@@ -10,3 +10,23 @@ docs
 /web/node_modules
 /web/dist
 !THIRD-PARTY-LICENSES.md
+
+# Local secrets, runtime data and generated artifacts are never build inputs.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+/data
+/logs
+/new-api
+/one-api
+/electron/dist
+/.cache
+/.gomodcache
+/.gocache-temp
+/.gopath
+/.local-tests
+/.test
+**/*.db
+**/*.db-*
+**/*.log

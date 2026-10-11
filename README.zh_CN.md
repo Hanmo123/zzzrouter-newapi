@@ -55,6 +55,30 @@
 
 ---
 
+## ZzzRouter Docker 镜像
+
+本仓库基于 New API，Docker 镜像包含 Go API 和内置管理页面；独立 Nuxt 前端位于 [Hanmo123/zzzrouter-frontend](https://github.com/Hanmo123/zzzrouter-frontend)。
+
+GitHub Actions 的 **Publish Docker image (GHCR)** 在推送 `main`、推送 `v*` 标签或手动运行时，构建并发布 `linux/amd64`、`linux/arm64` 镜像。PR 仅检查 amd64 构建，不登录或发布。使用仓库自动提供的 `GITHUB_TOKEN`，需允许 Actions 运行及 `packages: write` 权限，无需 Docker Hub 密钥。原有 Docker Hub、二进制 Release 和 Electron 发布工作流仅在上游 `QuantumNous/new-api` 仓库运行。
+
+镜像：`ghcr.io/hanmo123/zzzrouter-newapi`。`latest` 随默认分支更新，另发布 `main`、`sha-<完整提交 SHA>` 和原样保留的版本标签，例如 `v1.0.0`。版本标签发布不覆盖 `latest`。首次发布的 GHCR Package 可能是 private；匿名拉取前需在 Package 设置中设为 public，私有镜像则先用有 `read:packages` 权限的凭据登录 `ghcr.io`。
+
+```bash
+# 本地构建，包含内置管理页面
+docker build --build-arg VERSION=local -t zzzrouter-newapi:local .
+
+# 使用 CI 镜像；这是单实例 SQLite 示例，数据保存在 Docker 卷中
+docker network create zzzrouter
+docker pull ghcr.io/hanmo123/zzzrouter-newapi:latest
+docker run -d --name new-api --restart unless-stopped \
+  --network zzzrouter -p 127.0.0.1:3002:3000 \
+  -v zzzrouter-newapi-data:/data \
+  --env-file .env \
+  ghcr.io/hanmo123/zzzrouter-newapi:latest
+```
+
+运行前从 `.env.example` 创建 `.env` 并按部署环境配置；示例默认使用 SQLite，也可设置 `SQL_DSN` 和 `REDIS_CONN_STRING` 连接已有服务。镜像内置 `/api/status` 健康检查，本地 `.env`、数据库和日志排除在构建上下文之外。生产 HTTPS、Cookie、OIDC 回调和前端 `NUXT_SITE_URL` 配置见独立前端的 README。下方上游部署示例仍使用上游镜像，部署本分支时请使用上述 GHCR 镜像地址。
+
 ## 📝 项目说明
 
 New API 是面向应用、Agent 和团队的自托管 AI 网关。将不同厂商的模型服务接入统一入口，在同一套控制台中管理渠道、访问权限、用量与成本。
